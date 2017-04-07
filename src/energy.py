@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2016 The MLab quick diunal searcher
+# Copyright 2017 The MLab quick diurnal searcher
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -61,6 +61,13 @@ def power_ratio(timeseries, period, harmonics=1):
 
 def test_power_ratio():
   def approxEQ(c, p, tp):
+    """Result tester for power_ratio()
+    c: Two tuple from power_ratio() above
+    p: Computed power at 1/(20h) and harmonics
+    tp: Computed total power
+
+    Returns True if both values agree within lim
+    """
     lim = 0.00001
     cp, ctp = c
     return ((cp-p)<lim) and ((ctp-tp)<lim)
