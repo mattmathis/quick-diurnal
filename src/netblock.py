@@ -15,6 +15,7 @@
 """Supporting classes for recursively computing diurnal energy on address blocks.
 
 """
+import unittest
 from pandas import DataFrame, Series
 import pandas as pd
 
@@ -70,21 +71,19 @@ class ScoreFrame(DataFrame):
 ################################################################
 # built in testers
 
-def test_time2bucket():
-  assert (time2bucket(0) == "T00:00")
-  assert (time2bucket(300) == "T00:05")
-  assert (time2bucket(3600) == "T01:00")
-  assert (time2bucket(24*60*60-1) == "T23:59")
-  assert (time2bucket(24*60*60) == "T00:00")
+class TestNetblock(unittest.TestCase):
+  def test_time2bucket(self):
+    self.assertEqual(time2bucket(0), "T00:00")
+    self.assertEqual(time2bucket(300), "T00:05")
+    self.assertEqual(time2bucket(3600), "T01:00")
+    self.assertEqual(time2bucket(24*60*60-1), "T23:59")
+    self.assertEqual(time2bucket(24*60*60), "T00:00")
 
-def test_netblock():
-  pass
+  def test_netblock(self):
+    pass
 
-def test_scoreframe():
-  pass
+  def test_scoreframe(self):
+    pass
 
 if __name__ == "__main__":
-  test_time2bucket()
-  test_netblock()
-  test_scoreframe()
-  print "All pass"
+  unittest.main()
