@@ -59,41 +59,43 @@ def power_ratio(timeseries, period, harmonics=1):
   return ((hpower, numpy.sum(power)))
 
 
-def test_power_ratio():
-  def approxEQ(c, p, tp):
-    """Result tester for power_ratio()
-    c: Two tuple from power_ratio() above
-    p: Computed power at 1/(20h) and harmonics
-    tp: Computed total power
+import unittest
 
-    Returns True if both values agree within lim
-    """
-    lim = 0.00001
-    cp, ctp = c
-    return ((cp-p)<lim) and ((ctp-tp)<lim)
-  size = 24*12
-  uniform = [1.0 for t in range(size)]
-  sinewave1 = [math.sin((math.pi*2*t)/size) for t in range(size)]
-  sinewave2 = [math.sin((math.pi*4*t)/size) for t in range(size)]
-  impulse = [0.0 for t in range(size)]
-  impulse[0] = 1.0
-  # Error expected
-  assert(power_ratio(sinewave1, size-1) == False)
-  assert(approxEQ(power_ratio(uniform, size), 0.0, size*size))
-  ss2=size*size/2 # expected power for sine signals
-  assert(approxEQ(power_ratio(sinewave1, size), ss2, ss2))
-  assert(approxEQ(power_ratio(sinewave2, size), 0.0, ss2))
-  assert(approxEQ(power_ratio(sinewave2, size, 1), 0.0, ss2))
-  assert(approxEQ(power_ratio(sinewave2, size, 3), ss2, ss2))
-  assert(approxEQ(power_ratio(sinewave2, size, 3), ss2, ss2))
-  assert(approxEQ(power_ratio(sinewave2, size, 4), ss2, ss2))
-  ssi=size/2+1 # expected impulse power
-  assert(approxEQ(power_ratio(impulse, size, 1), 1.0, ssi))
-  assert(approxEQ(power_ratio(impulse, size, 2), 2.0, ssi))
-  assert(approxEQ(power_ratio(impulse, size, 3), 3.0, ssi))
-  assert(approxEQ(power_ratio(impulse, size, 4), 4.0, ssi))
-  print "All pass"
+class TestEnergy(unittest.TestCase):
+  def test_power_ratio(self):
+    def approxEQ(c, p, tp):
+      """Result tester for power_ratio()
+      c: Two tuple from power_ratio() above
+      p: Computed power at 1/(20h) and harmonics
+      tp: Computed total power
+
+      Returns True if both values agree within lim
+      """
+      lim = 0.00001
+      cp, ctp = c
+      return ((cp-p)<lim) and ((ctp-tp)<lim)
+    size = 24*12
+    uniform = [1.0 for t in range(size)]
+    sinewave1 = [math.sin((math.pi*2*t)/size) for t in range(size)]
+    sinewave2 = [math.sin((math.pi*4*t)/size) for t in range(size)]
+    impulse = [0.0 for t in range(size)]
+    impulse[0] = 1.0
+    # Error expected
+    self.assertFalse(power_ratio(sinewave1, size-1))
+    self.assertTrue(approxEQ(power_ratio(uniform, size), 0.0, size*size))
+    ss2=size*size/2 # expected power for sine signals
+    self.assertTrue(approxEQ(power_ratio(sinewave1, size), ss2, ss2))
+    self.assertTrue(approxEQ(power_ratio(sinewave2, size), 0.0, ss2))
+    self.assertTrue(approxEQ(power_ratio(sinewave2, size, 1), 0.0, ss2))
+    self.assertTrue(approxEQ(power_ratio(sinewave2, size, 3), ss2, ss2))
+    self.assertTrue(approxEQ(power_ratio(sinewave2, size, 3), ss2, ss2))
+    self.assertTrue(approxEQ(power_ratio(sinewave2, size, 4), ss2, ss2))
+    ssi=size/2+1 # expected impulse power
+    self.assertTrue(approxEQ(power_ratio(impulse, size, 1), 1.0, ssi))
+    self.assertTrue(approxEQ(power_ratio(impulse, size, 2), 2.0, ssi))
+    self.assertTrue(approxEQ(power_ratio(impulse, size, 3), 3.0, ssi))
+    self.assertTrue(approxEQ(power_ratio(impulse, size, 4), 4.0, ssi))
 
 
 if __name__ == "__main__":
-  test_power_ratio()
+  unittest.main()
