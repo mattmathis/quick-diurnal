@@ -23,12 +23,12 @@ import pandas as pd
 # Some helper functions
 
 OneDay = 86400          # seconds per day
-BucketSize = 3600       # seconds per bucket
+BucketSize = 300       # seconds per bucket
 
 def time2bucket(time):
   """ convert seconds to a bucket name string: T00:00 - T23:59 """
-  time = time % OneDay
-  return "T%02d:%02d"%(time/3600, (time/60)%60)
+  bucket = ((time / BucketSize) * BucketSize) % OneDay
+  return "T%02d:%02d"%(bucket/3600, (bucket/60)%60)
 
 ################################################################
 class NetBlock(DataFrame):
@@ -74,9 +74,11 @@ class ScoreFrame(DataFrame):
 class TestNetblock(unittest.TestCase):
   def test_time2bucket(self):
     self.assertEqual(time2bucket(0), "T00:00")
+    self.assertEqual(time2bucket(1), "T00:00")
+    self.assertEqual(time2bucket(299), "T00:00")
     self.assertEqual(time2bucket(300), "T00:05")
     self.assertEqual(time2bucket(3600), "T01:00")
-    self.assertEqual(time2bucket(24*60*60-1), "T23:59")
+    self.assertEqual(time2bucket(24*60*60-1), "T23:55")
     self.assertEqual(time2bucket(24*60*60), "T00:00")
 
   def test_netblock(self):
