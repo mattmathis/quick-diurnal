@@ -43,5 +43,5 @@ def main(file):
     else:
       insert children into rank queue by score
 
-    sort done queue
+    sort done queue by rank
     display top ranked netblocks

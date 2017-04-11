@@ -18,7 +18,7 @@ Also computes the total energy.  The ratio of these 2 energies is a
 scalar signal of how likely there is some networking behavior related
 to the diurnal cycles of human behavior.  Note that this is expected
 for some parameters, such as traffic volumes.  However it is not
-expected for performance signals that arising from edge networks.
+expected for performance signals that arise from edge networks.
 
 This is intended to be used as a library.  If run directly, it does a unit test.
 """
