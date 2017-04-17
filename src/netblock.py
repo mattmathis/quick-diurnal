@@ -23,8 +23,9 @@ import math
 from energy import power_ratio
 
 ################################################################
-# Some helper classes
+# Some helper classes and functions
 
+################ Time Buckets
 OneDay = 86400          # seconds per day
 
 class TimeBucket():
@@ -52,6 +53,40 @@ class TimeBucket():
     """Return a list of all bucket names."""
 
     return([self.bucket(i) for i in range(0, OneDay, self.bucketsize)])
+
+################ IP address and subnet tools
+from netaddr import IPAddress
+
+def inet_addr(s):
+  """Convert IP address string xxx.xxx.xxx.xxx to int"""
+  return int(IPAddress(s))
+
+def inet_ntoa(i):
+  """Convert int to address string xxx.xxx.xxx.xxx"""
+  return str(IPAddress(i))
+
+class subnet():
+  """Primitives for creating an manipulating subnet masks"""
+
+  def __init__(self, width, address):
+    """Create a subnet mask from an address at a specified width.
+
+    NB: does not support IPv6
+    """
+    self.width = width
+    self.mask = (2 ** 32) - (2 ** (32 - width))
+    self.prefix = self.mask & address
+
+  def match(self, address):
+    """Check if an address matches a subnet
+
+    NB: this is likely to be expanded inline for panda iterators
+    """
+    return (self.mask & address) == self.prefix
+
+  def invert(self):
+    prefix = self.prefix ^ (2 ** (32 - self.width))
+    return subnet(self.width, prefix)
 
 ################################################################
 class NetBlock():
@@ -106,6 +141,7 @@ class NetBlock():
     timeseries = [0.0 if np.isnan(tv) else tv for tv in timeseries]
     return power_ratio(timeseries, len(self.tb.all()), harmonics)
 
+
 ################################################################
 class ScoreFrame(DataFrame):
   """Manipulate netblocks and scores
@@ -122,12 +158,13 @@ class ScoreFrame(DataFrame):
 
     # Bump netmask
     # cut block on first row
-    If rest is empty: loop
-    score child
-    score remainder
+    # If rest is empty: loop
+    # score child
+    # score remainder
     if interesting:
-      push child
-      push remainder
+      # push child
+      # push remainder
+      pass
 
 
 
@@ -138,9 +175,13 @@ class ScoreFrame(DataFrame):
 
   def annotate(self):
     # compute scores
+    pass
 
-  def push(self, list)
-  def pop(list)
+  def push(self, list):
+    pass
+
+  def pop(list):
+    pass
 
 ################################################################
 # built in testers
@@ -159,6 +200,14 @@ class TestNetblock(unittest.TestCase):
     self.assertEqual(all[0], "T00:00")
     self.assertEqual(all[1], "T00:05")
     self.assertEqual(len(all), OneDay / 300)
+
+  def test_IPaddr(self):
+    self.assertEqual(inet_addr('192.168.4.54'), 3232236598)
+    self.assertEqual(inet_ntoa(3232236598), '192.168.4.54')
+    sn = subnet(16, inet_addr('192.168.4.54'))
+    self.assertEqual(sn.mask, inet_addr('255.255.0.0'))
+    self.assertEqual(sn.prefix, inet_addr('192.168.0.0'))
+    self.assertEqual(sn.invert().prefix, inet_addr('192.169.0.0'))
 
   def test_netblock(self):
     def smear(seq):
