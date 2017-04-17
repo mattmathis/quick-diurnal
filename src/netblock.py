@@ -111,12 +111,36 @@ class ScoreFrame(DataFrame):
   """Manipulate netblocks and scores
 
   A ScoreFrame is a DataFrame where:
-    Rows correspond to scored netblocks
+    Rows correspond to netblocks with attributes and scores
     Columns include scores, address masks, and the netblocks themselves
 
   """
   def __init__(self):
     self.rank = 0
+
+  def process(self):
+
+    # Bump netmask
+    # cut block on first row
+    If rest is empty: loop
+    score child
+    score remainder
+    if interesting:
+      push child
+      push remainder
+
+
+
+  def fork(self, pred):
+    # Filter on predicate
+    # delete child rows from parent
+    return (child)
+
+  def annotate(self):
+    # compute scores
+
+  def push(self, list)
+  def pop(list)
 
 ################################################################
 # built in testers
