@@ -57,6 +57,10 @@ def main():
     # sort done queue by rank
     # display top ranked netblocks
 
+def score(nb):
+  de, te = nb.energy()
+  return int(-100 * math.log(de / te))
+
 
 if __name__ == "__main__":
   main()

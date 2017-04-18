@@ -113,14 +113,14 @@ class NetBlock():
     cols is an optional column specifier (defaults to list(itr)).
 
     cannon(row, tb) should include:
-      row["client"] = inet_addr(row["client_ip_v4'])
+      row["client"] = inet_addr(row["client_ip_v4"])
       row[tb.bucket(row["start_time"])] = some_value
 
     """
     if not cols:
       cols = list(itr)
     cols = self.tb.all() + cols
-    self.data = DataFrame(itr, columns = cols)
+    self.data = pd.DataFrame(itr, columns = cols)
     self.data = self.data.apply(cannon,
                     axis = 'columns',
                     raw = True,
@@ -143,7 +143,7 @@ class NetBlock():
 
 
 ################################################################
-class ScoreFrame(DataFrame):
+class ScoreFrame():
   """Manipulate netblocks and scores
 
   A ScoreFrame is a DataFrame where:
@@ -151,37 +151,74 @@ class ScoreFrame(DataFrame):
     Columns include scores, address masks, and the netblocks themselves
 
   """
+  todo = [] # Priority Queue
+  done = []
 
+  def initial(self, itr, sn):
+    self.data = pd.DataFrame(itr)
+    self.subnet = sn
 
-  def __init__(self, parent, sn):
-    self.rank = 0
-    self.sn = sn
-    self.data = parent.DataFrame([sn.match(parent.client)])
+  def fromparent(self, parent, sn, score, rowmask=None):
+    """Create a new ScoreFrame
+    from:
+       parent - a parent score frame and either
+       sn - a subnet, or
+       rowmask - an arbitrary row mask
+       score() - Computes the rank (priority) of this block
+    """
+    self.subnet = sn
+    if rowmask:
+      self.data = DataFrame.fromparent(parent.data, rowmask)
+    else:
+      self.data = DataFrame.fromparent(parent.data, [sn.match(parent.client)])
     self.energy = energy(self.data)
+    self.rank = score(self)
 
-  def process(self):
+  def process(self, godeeper):
+    """
+    Recursively split and score address blocks
+    godeeper() controls the recursion
+    """
+    neww = self.subnet.width+1
+    subA = SubNet(neww, self.data[0].client)
+    subB = subA.invert()
+    blockB = ScoreFrame(self, subB)
+    while len(blockB) == 0:
+      neww += 1
+      if neww > 24:
+        break
+      subA = SubNet(neww, self.data[0].client)
+      subB = subA.invert()
+      blockB = ScoreFrame(self, subB)
+    else:
+      blockA = ScoreFrame(self, subA)
+      if godeeper(self, blockA, blockB):
+        push(ScoreFrame.todo, blockA)
+        push(ScoreFrame.todo, blockB)
+        return
+    push(ScoreFrame.done, self)
 
-    # Bump netmask
-    # cut block on first row
-    # If rest is empty: loop
-    # score child
-    # score remainder
-    if interesting:
-      # push child
-      # push remainder
-      pass
+import heapq
+def push(heap, item):
+  heapq.heappush(heap, (item.rank, item))
 
-
-  def push(self, list, score):
-    pass
-
-  def pop(list):
-    pass
+def pop(heap):
+  rank, item = heapq.heappop(heap)
+  return item
 
 ################################################################
 # built in testers
+def test_canon(row, tb):
+  """Test helper to do minimal result canonicalization"""
+  try:
+    row["client"] = inet_addr(row["client_ip_v4"])
+  except:
+    pass # ignore errors
+  row[tb.bucket(row["Time"])] = row["Value"]
+  return (row)
 
 class TestNetblock(unittest.TestCase):
+
   def test_time2bucket(self):
     tb = TimeBucket(300)
     self.assertEqual(tb.bucket(0), "T00:00")
@@ -212,10 +249,6 @@ class TestNetblock(unittest.TestCase):
           "Time" : pd.Series(range(0, OneDay,OneDay/len(seq)))
       }))
 
-    def canonical(row, tb):
-      row[tb.bucket(row["Time"])] = row["Value"]
-      return (row)
-
     def approxEQ(c, p, tp):  # Copied from TestEnergy in energy.py
       """Result tester for power_ratio()
       c: Two tuple from power_ratio() above
@@ -234,15 +267,30 @@ class TestNetblock(unittest.TestCase):
     # test cases from TestEnergy in energy.py
     sinewave1 = [math.sin((math.pi*2*t)/size) for t in range(size)]
     sinewave2 = [math.sin((math.pi*4*t)/size) for t in range(size)]
-    self.assertTrue(approxEQ(nb.parse(smear(sinewave1), canonical).energy(),
+    self.assertTrue(approxEQ(nb.parse(smear(sinewave1), test_canon).energy(),
                              ss2, ss2))
-    self.assertTrue(approxEQ(nb.parse(smear(sinewave2), canonical).energy(),
+    self.assertTrue(approxEQ(nb.parse(smear(sinewave2), test_canon).energy(),
                              0, ss2))
-    self.assertTrue(approxEQ(nb.parse(smear(sinewave2), canonical).energy(2),
+    self.assertTrue(approxEQ(nb.parse(smear(sinewave2), test_canon).energy(2),
                              ss2, ss2))
 
   def test_scoreframe(self):
-    pass
+    def test_score(sf):
+      assert(False)
+      return sf.data.ix[0]['score']
+
+    rawdata = pd.DataFrame({
+        'client_ip_v4': ["10.1.1.1", "11.1.1.1", "10.2.1.1"],
+        'Value' : [ 1, 2, 3],
+        'Time' : [ 100, 101, 102 ],
+        'score': [ 2, 3, 1],
+        })
+
+    nb = NetBlock(300)
+    nb.parse(rawdata, test_canon)
+    sn = SubNet(2, nb.data.ix[0].client)
+    alldata = ScoreFrame().initial(nb, sn)
+#    push(ScoreFrame.todo, alldata)
 
 if __name__ == "__main__":
   unittest.main()
