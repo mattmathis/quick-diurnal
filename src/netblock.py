@@ -65,7 +65,7 @@ def inet_ntoa(i):
   """Convert int to address string xxx.xxx.xxx.xxx"""
   return str(IPAddress(i))
 
-class subnet():
+class SubNet():
   """Primitives for creating an manipulating subnet masks"""
 
   def __init__(self, width, address):
@@ -86,7 +86,7 @@ class subnet():
 
   def invert(self):
     prefix = self.prefix ^ (2 ** (32 - self.width))
-    return subnet(self.width, prefix)
+    return SubNet(self.width, prefix)
 
 ################################################################
 class NetBlock():
@@ -108,13 +108,13 @@ class NetBlock():
   def parse(self, itr, cannon, cols=None):
     """Parse, canonicalize and score imported data into a NetBlock DataFrame
 
-    itr can be any iterator (accepted for DataFrame(itr, ...)
+    itr can be any iterator accepted for DataFrame(itr, ...)
     cannon(row) is a canonicalization operation applied to each row
-    cols is an optional column specifier needed
-        if list(itr) does not return s suitable list of columns.
+    cols is an optional column specifier (defaults to list(itr)).
 
-    cannon(row, tb) should end with:
-      row[tb.bucket(t)] = v # Where t is the time and v the value of one measurement
+    cannon(row, tb) should include:
+      row["client"] = inet_addr(row["client_ip_v4'])
+      row[tb.bucket(row["start_time"])] = some_value
 
     """
     if not cols:
@@ -151,8 +151,13 @@ class ScoreFrame(DataFrame):
     Columns include scores, address masks, and the netblocks themselves
 
   """
-  def __init__(self):
+
+
+  def __init__(self, parent, sn):
     self.rank = 0
+    self.sn = sn
+    self.data = parent.DataFrame([sn.match(parent.client)])
+    self.energy = energy(self.data)
 
   def process(self):
 
@@ -167,17 +172,7 @@ class ScoreFrame(DataFrame):
       pass
 
 
-
-  def fork(self, pred):
-    # Filter on predicate
-    # delete child rows from parent
-    return (child)
-
-  def annotate(self):
-    # compute scores
-    pass
-
-  def push(self, list):
+  def push(self, list, score):
     pass
 
   def pop(list):
@@ -204,7 +199,7 @@ class TestNetblock(unittest.TestCase):
   def test_IPaddr(self):
     self.assertEqual(inet_addr('192.168.4.54'), 3232236598)
     self.assertEqual(inet_ntoa(3232236598), '192.168.4.54')
-    sn = subnet(16, inet_addr('192.168.4.54'))
+    sn = SubNet(16, inet_addr('192.168.4.54'))
     self.assertEqual(sn.mask, inet_addr('255.255.0.0'))
     self.assertEqual(sn.prefix, inet_addr('192.168.0.0'))
     self.assertEqual(sn.invert().prefix, inet_addr('192.169.0.0'))
@@ -239,9 +234,12 @@ class TestNetblock(unittest.TestCase):
     # test cases from TestEnergy in energy.py
     sinewave1 = [math.sin((math.pi*2*t)/size) for t in range(size)]
     sinewave2 = [math.sin((math.pi*4*t)/size) for t in range(size)]
-    self.assertTrue(approxEQ(nb.parse(smear(sinewave1), canonical).energy(), ss2, ss2))
-    self.assertTrue(approxEQ(nb.parse(smear(sinewave2), canonical).energy(), 0, ss2))
-    self.assertTrue(approxEQ(nb.parse(smear(sinewave2), canonical).energy(2), ss2, ss2))
+    self.assertTrue(approxEQ(nb.parse(smear(sinewave1), canonical).energy(),
+                             ss2, ss2))
+    self.assertTrue(approxEQ(nb.parse(smear(sinewave2), canonical).energy(),
+                             0, ss2))
+    self.assertTrue(approxEQ(nb.parse(smear(sinewave2), canonical).energy(2),
+                             ss2, ss2))
 
   def test_scoreframe(self):
     pass
