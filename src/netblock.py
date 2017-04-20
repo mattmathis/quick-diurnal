@@ -31,7 +31,7 @@ OneDay = 86400          # seconds per day
 class TimeBucket():
   """Tag tests by time, rounded into buckets.
 
-  The bucketsize must be multiples of minutes, specified in seconds,
+  The bucket size must be multiples of minutes, specified in seconds,
   and divide into 24 hours.  (Required by other parts of the
   algorithm).
   """
@@ -76,59 +76,166 @@ class SubNet():
     self.width = width
     self.mask = (2 ** 32) - (2 ** (32 - width))
     self.prefix = self.mask & address
+    self.last = (2 ** (32 - width)) - 1 + self.prefix
 
   def match(self, address):
     """Check if an address matches a subnet
 
-    NB: this is likely to be expanded inline for panda iterators
+    NB: Match may be expanded inline for panda iterators
     """
     return (self.mask & address) == self.prefix
 
   def invert(self):
+    """Toggle the last bit of the prefix"""
     prefix = self.prefix ^ (2 ** (32 - self.width))
     return SubNet(self.width, prefix)
+
+  def str(self):
+    """Display conventional prefix/len notation"""
+    return "%s/%d"%(inet_ntoa(self.prefix), self.width)
+
+  def vstr(self):
+    """Verbose display: prefix/len (netmask) - last"""
+    return "%s/%d (%s) - %s"%(inet_ntoa(self.prefix),
+                              self.width,
+                              inet_ntoa(self.mask),
+                              inet_ntoa(self.last))
+
+################ Calendar queue (aka heap queue)
+import heapq
+def hpush(heap, item):
+  """Queue ordered by item.rank"""
+  heapq.heappush(heap, (item.rank, item))
+
+def hpop(heap):
+  """Dequeue, discard rank"""
+  rank, item = heapq.heappop(heap)
+  return item
 
 ################################################################
 class NetBlock():
   """Process and score lists of tests
 
-  A netblock is a DataFrame where:
+  A NetBlock represents a group of tests sharing attributes.
+
+  It includes parameters describing the shared attributes:
+    .subnet - width, netmask and prefix identifying a subnet
+    .week - [FUTURE] week start time
+
+  It includes a DataFrame .data where:
     rows correspond to tests (NDT etc);
-    columns correspond to Web100 vars and computed scores for each row.
+    columns correspond to Web100 vars and computed per test scores.
 
-  Each netblock only contains tests (rows) selected by some outer loop.
+  And computed results
+    .energy - computed energies for this NetBlock
+    .rank - Priority for recursive processing
+
+  TODO: It might be more effient to use panels within one netframe.
   """
+  # Invariant after first instantiation
+  timebucket = None
+  TB = None
+  TBall = []
+  canonF = None
+  energyF = None
+  # Shared state
+  todo = [] # Priority Queue
+  done = []
 
-  def __init__(self, timebucket):
+  def __init__(self, timebucket=0, canon = None, energy = None, rank = None):
     """
-    The size of the timebucket is an invariant
-    """
-    self.tb = TimeBucket(timebucket)
+    First invocation require additional arguments:
+    timebucket - Time quantization size in seconds (e.g. 300)
+    canon(row) - a canonicalization operation applied to each row
+    energy - energy calculation for the NetBlock
+    rank - optional rank score calculation (processing priority)
 
-  def parse(self, itr, cannon, cols=None):
-    """Parse, canonicalize and score imported data into a NetBlock DataFrame
-
-    itr can be any iterator accepted for DataFrame(itr, ...)
-    cannon(row) is a canonicalization operation applied to each row
-    cols is an optional column specifier (defaults to list(itr)).
-
-    cannon(row, tb) should include:
-      row["client"] = inet_addr(row["client_ip_v4"])
+    canon(row) should include:
+      row["clientIP"] = inet_addr(row["client_ip_v4"])
       row[tb.bucket(row["start_time"])] = some_value
 
     """
+    if timebucket != 0:
+      NetBlock.TB = TimeBucket(timebucket)
+      NetBlock.TBall = NetBlock.TB.all()
+      NetBlock.canonF = canon
+      NetBlock.energyF = energy
+      NetBlock.rankF = rank     # optional
+      if not (timebucket and canon and energy):
+        print "Missing argument(s) on first NetBlock()"
+        assert(False)
+
+  def parse(self, itr, cols=None):
+    """Parse, canonicalize and score imported data into a NetBlock DataFrame
+
+    itr can be any iterator accepted for DataFrame(itr, ...)
+
+    cols is an optional column specifier (defaults to list(itr)).
+
+    TODO(mattmathis) multiple parse calls should append data.
+    """
     if not cols:
       cols = list(itr)
-    cols = self.tb.all() + cols
+    cols = NetBlock.TBall + cols
     self.data = pd.DataFrame(itr, columns = cols)
-    self.data = self.data.apply(cannon,
-                    axis = 'columns',
-                    raw = True,
-                    args = [self.tb])
+    self.data = self.data.apply(self.canonF,
+                                axis = 'columns',
+                                raw = True,
+                                args = [self.TB])
     return self
 
-  def energy(self, harmonics=1):
-    """Compute the energy of this Netblock.
+  def first_row(self):
+    assert (len(self.data) > 0)
+    return (self.data.iloc[0])
+
+  def fork_block(self, sn=None, rowmask=None):
+    """Create a new NetBlock and compute initial scores
+    from:
+       self - the parent
+       sn - a new subnet, or
+       rowmask - an arbitrary row mask
+    """
+    child = NetBlock()
+    if sn == None:
+      sn = self.subnet
+    child.subnet = sn
+    if not rowmask:
+      # Arrgh! I intended this to be an implicit loop
+      rowmask = [sn.match(ip) for ip in self.data.clientIP]
+    child.data = DataFrame.reindex(self.data[rowmask])
+    if len(child.data) > 0:
+      child.energy = child.energyF()
+      if child.rankF:
+        child.rank = child.rankF()
+    return child
+
+  def process(self, go_deeper):
+    """Recursively split and queue NetBlock for processing
+
+    go_deeper() controls the recursion
+    """
+    neww = self.subnet.width+1
+    subA = SubNet(neww, self.first_row().clientIP)
+    subB = subA.invert()
+    blockB = self.fork_block(subB)
+    while len(blockB.data) == 0:
+      neww = neww + 1
+      if neww > 24:
+        break
+      subA = SubNet(neww, self.first_row().clientIP)
+      subB = subA.invert()
+      blockB = self.fork_block(subB)
+    else:
+      blockA = self.fork_block(subA)
+      if go_deeper(self, blockA, blockB):
+        hpush(NetBlock.todo, blockA)
+        hpush(NetBlock.todo, blockB)
+        return
+    self.subnet.width = neww - 1
+    hpush(NetBlock.done, self)
+
+  def energy_sum_nan(self, harmonics=1):
+    """Compute the energy of this NetBlock.
 
     Returns a 2tuple:
     energy at 1/(24hr) and selected harmonics
@@ -137,87 +244,26 @@ class NetBlock():
     NB: this may be superseded by a future summary function.
     """
 
-    timeseries = [self.data[tt].sum() for tt in self.tb.all()]
+    timeseries = [self.data[tt].sum() for tt in  NetBlock.TBall]
     timeseries = [0.0 if np.isnan(tv) else tv for tv in timeseries]
-    return power_ratio(timeseries, len(self.tb.all()), harmonics)
+    return power_ratio(timeseries, len(timeseries), harmonics)
 
-
-################################################################
-class ScoreFrame():
-  """Manipulate netblocks and scores
-
-  A ScoreFrame is a DataFrame where:
-    Rows correspond to netblocks with attributes and scores
-    Columns include scores, address masks, and the netblocks themselves
-
-  """
-  todo = [] # Priority Queue
-  done = []
-
-  def initial(self, itr, sn):
-    self.data = pd.DataFrame(itr)
-    self.subnet = sn
-
-  def fromparent(self, parent, sn, score, rowmask=None):
-    """Create a new ScoreFrame
-    from:
-       parent - a parent score frame and either
-       sn - a subnet, or
-       rowmask - an arbitrary row mask
-       score() - Computes the rank (priority) of this block
-    """
-    self.subnet = sn
-    if rowmask:
-      self.data = DataFrame.fromparent(parent.data, rowmask)
-    else:
-      self.data = DataFrame.fromparent(parent.data, [sn.match(parent.client)])
-    self.energy = energy(self.data)
-    self.rank = score(self)
-
-  def process(self, godeeper):
-    """
-    Recursively split and score address blocks
-    godeeper() controls the recursion
-    """
-    neww = self.subnet.width+1
-    subA = SubNet(neww, self.data[0].client)
-    subB = subA.invert()
-    blockB = ScoreFrame(self, subB)
-    while len(blockB) == 0:
-      neww += 1
-      if neww > 24:
-        break
-      subA = SubNet(neww, self.data[0].client)
-      subB = subA.invert()
-      blockB = ScoreFrame(self, subB)
-    else:
-      blockA = ScoreFrame(self, subA)
-      if godeeper(self, blockA, blockB):
-        push(ScoreFrame.todo, blockA)
-        push(ScoreFrame.todo, blockB)
-        return
-    push(ScoreFrame.done, self)
-
-import heapq
-def push(heap, item):
-  heapq.heappush(heap, (item.rank, item))
-
-def pop(heap):
-  rank, item = heapq.heappop(heap)
-  return item
 
 ################################################################
 # built in testers
-def test_canon(row, tb):
-  """Test helper to do minimal result canonicalization"""
-  try:
-    row["client"] = inet_addr(row["client_ip_v4"])
-  except:
-    pass # ignore errors
-  row[tb.bucket(row["Time"])] = row["Value"]
-  return (row)
 
-class TestNetblock(unittest.TestCase):
+# Helpers first
+def test_energy_canon(nb, row, tb):
+  """Test helper to do minimal result canonicalization"""
+  row[tb.bucket(row["Time"])] = row["Value"]
+  return row
+
+def test_subnet_canon(nb, row, tb):
+  """Test helper to do minimal result canonicalization"""
+  row["clientIP"] = inet_addr(row["client_ip_v4"])
+  return row
+
+class Test_Netblock(unittest.TestCase):
 
   def test_time2bucket(self):
     tb = TimeBucket(300)
@@ -240,8 +286,10 @@ class TestNetblock(unittest.TestCase):
     self.assertEqual(sn.mask, inet_addr('255.255.0.0'))
     self.assertEqual(sn.prefix, inet_addr('192.168.0.0'))
     self.assertEqual(sn.invert().prefix, inet_addr('192.169.0.0'))
+    self.assertTrue(sn.match(inet_addr('192.168.1.2')))
+    self.assertFalse(sn.match(inet_addr('192.169.1.2')))
 
-  def test_netblock(self):
+  def test_netblock_energy(self):
     def smear(seq):
       """Spread a time series as one point per row in a NetBlock."""
       return(pd.DataFrame({
@@ -261,36 +309,65 @@ class TestNetblock(unittest.TestCase):
       cp, ctp = c
       return ((cp-p)<lim) and ((ctp-tp)<lim)
 
-    size = 24*12
+    size = 6
     ss2 = size*size/4 # TODO(mattmathis) why /4?
-    nb = NetBlock(OneDay/size)
+    nb = NetBlock(OneDay/size,
+                  test_energy_canon,
+                  NetBlock.energy_sum_nan,
+                  None)
     # test cases from TestEnergy in energy.py
     sinewave1 = [math.sin((math.pi*2*t)/size) for t in range(size)]
     sinewave2 = [math.sin((math.pi*4*t)/size) for t in range(size)]
-    self.assertTrue(approxEQ(nb.parse(smear(sinewave1), test_canon).energy(),
+    self.assertTrue(approxEQ(nb.parse(smear(sinewave1)).energy_sum_nan(),
                              ss2, ss2))
-    self.assertTrue(approxEQ(nb.parse(smear(sinewave2), test_canon).energy(),
+    self.assertTrue(approxEQ(nb.parse(smear(sinewave2)).energy_sum_nan(),
                              0, ss2))
-    self.assertTrue(approxEQ(nb.parse(smear(sinewave2), test_canon).energy(2),
+    self.assertTrue(approxEQ(nb.parse(smear(sinewave2)).energy_sum_nan(2),
                              ss2, ss2))
 
-  def test_scoreframe(self):
-    def test_score(sf):
-      assert(False)
-      return sf.data.ix[0]['score']
+  def test_netblock_subnets(self):
+    def test_rank(nb):
+      return nb.first_row().score
+    def always_true(nb, *rest):
+      return True
+    def always_false(nb, *rest):
+      return False
 
     rawdata = pd.DataFrame({
-        'client_ip_v4': ["10.1.1.1", "11.1.1.1", "10.2.1.1"],
-        'Value' : [ 1, 2, 3],
-        'Time' : [ 100, 101, 102 ],
-        'score': [ 2, 3, 1],
+        'client_ip_v4': ["10.1.1.1", "10.2.1.1", "10.2.1.2", "11.4.1.1"],
+        'score': [ 2, 1, 1, 1],
         })
 
-    nb = NetBlock(300)
-    nb.parse(rawdata, test_canon)
-    sn = SubNet(2, nb.data.ix[0].client)
-    alldata = ScoreFrame().initial(nb, sn)
-#    push(ScoreFrame.todo, alldata)
+    parent = NetBlock(OneDay/8,
+                  test_subnet_canon,
+                  NetBlock.energy_sum_nan(),
+                  test_rank)
+    # All rawdata got parsed
+    parent.parse(rawdata)
+    self.assertEqual(len(parent.data), 4)
+    # fork_block got the right number of rows
+    sn = SubNet(8, parent.first_row().clientIP)
+    child = parent.fork_block(sn)
+    self.assertEqual(len(child.data), 3)
+    self.assertEqual(len(parent.data), 4)
+    # Confirm non-recursion case
+    child.process(always_false)
+    self.assertEqual(len(NetBlock.done), 1)
+    self.assertEqual(len(NetBlock.todo), 0)
+    # parent is done and has a minimal subnet
+    parent2 = hpop(NetBlock.done)
+    self.assertEqual(parent2.subnet.str(), "10.0.0.0/14")
+    self.assertEqual(len(NetBlock.done), 0)
+    # Confirm recursion case
+    child.process(always_true)
+    self.assertEqual(len(NetBlock.done), 0)
+    self.assertEqual(len(NetBlock.todo), 2)
+    # Two children in the proper order and subnets
+    child2 = hpop(NetBlock.todo)
+    child3 = hpop(NetBlock.todo)
+    self.assertEqual(len(NetBlock.todo), 0)
+    self.assertEqual(child2.subnet.str(), "10.2.0.0/15")
+    self.assertEqual(child3.subnet.str(), "10.0.0.0/15")
 
 if __name__ == "__main__":
   unittest.main()
