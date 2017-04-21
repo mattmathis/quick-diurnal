@@ -42,17 +42,14 @@ class TimeBucket():
     assert(bucketsize %60 == 0) # Manually tested once
     assert(OneDay % bucketsize == 0) # Manually tested once
     self.bucketsize = bucketsize
+    self.bucketcount = OneDay / bucketsize
+    self.all = [self.bucket(i) for i in range(0, OneDay, self.bucketsize)]
 
   def bucket(self,time):
     """Convert seconds to a bucket name string: T00:00 - T23:59 """
 
     bucket = ((time / self.bucketsize) * self.bucketsize) % OneDay
     return "T%02d:%02d"%(bucket/3600, (bucket/60)%60)
-
-  def all(self):
-    """Return a list of all bucket names."""
-
-    return([self.bucket(i) for i in range(0, OneDay, self.bucketsize)])
 
 ################ IP address and subnet tools
 from netaddr import IPAddress
@@ -157,7 +154,7 @@ class NetBlock():
     """
     if timebucket != 0:
       NetBlock.TB = TimeBucket(timebucket)
-      NetBlock.TBall = NetBlock.TB.all()
+      NetBlock.TBall = NetBlock.TB.all
       NetBlock.canonF = canon
       NetBlock.energyF = energy
       NetBlock.rankF = rank     # optional
@@ -165,7 +162,7 @@ class NetBlock():
         print "Missing argument(s) on first NetBlock()"
         assert(False)
 
-  def parse(self, itr, cols=None):
+  def parse(self, itr, cols=None, downsample=1):
     """Parse, canonicalize and score imported data into a NetBlock DataFrame
 
     itr can be any iterator accepted for DataFrame(itr, ...)
@@ -178,6 +175,9 @@ class NetBlock():
       cols = list(itr)
     cols = NetBlock.TBall + cols
     self.data = pd.DataFrame(itr, columns = cols)
+    if downsample > 1:
+       mask=pd.Series(np.random.randint(0, downsample, len(self.data)) == 0)
+       self.data = self.data[mask]
     self.data = self.data.apply(self.canonF,
                                 axis = 'columns',
                                 raw = True,
@@ -188,7 +188,7 @@ class NetBlock():
     assert (len(self.data) > 0)
     return (self.data.iloc[0])
 
-  def fork_block(self, sn=None, rowmask=None):
+  def fork_block(self, sn=None, rowmask=[]):
     """Create a new NetBlock and compute initial scores
     from:
        self - the parent
@@ -199,9 +199,8 @@ class NetBlock():
     if sn == None:
       sn = self.subnet
     child.subnet = sn
-    if not rowmask:
-      # Arrgh! I intended this to be an implicit loop
-      rowmask = [sn.match(ip) for ip in self.data.clientIP]
+    if len(rowmask) == 0:
+      rowmask = self.data.clientIP.apply(sn.match)
     child.data = DataFrame.reindex(self.data[rowmask])
     if len(child.data) > 0:
       child.energy = child.energyF()
@@ -274,7 +273,7 @@ class Test_Netblock(unittest.TestCase):
     self.assertEqual(tb.bucket(3600), "T01:00")
     self.assertEqual(tb.bucket(24*60*60-1), "T23:55")
     self.assertEqual(tb.bucket(24*60*60), "T00:00")
-    all = tb.all()
+    all = tb.all
     self.assertEqual(all[0], "T00:00")
     self.assertEqual(all[1], "T00:05")
     self.assertEqual(len(all), OneDay / 300)
@@ -340,7 +339,7 @@ class Test_Netblock(unittest.TestCase):
 
     parent = NetBlock(OneDay/8,
                   test_subnet_canon,
-                  NetBlock.energy_sum_nan(),
+                  NetBlock.energy_sum_nan,
                   test_rank)
     # All rawdata got parsed
     parent.parse(rawdata)
