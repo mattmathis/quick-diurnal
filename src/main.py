@@ -19,29 +19,48 @@
 """
 from pandas import DataFrame, Series
 import pandas as pd
+import netblock as NB
+import csv
 
-ResultTable = ScoreFrame(...) # one row per block, columns by properties
+# ResultTable = ScoreFrame(...) # one row per block, columns by properties
 
+def grock(row, tb):
+  row[tb.bucket(row["start_time"])] = row["download_mbps"]
+  return row
 
-def main(file):
+def main():
   # NB: division between ScoreFrame() and main() remains TBD
 
-  # read entire input into one netblock (one ScoreFrame row)
+  size = 12
+  f = open("../data.csv", 'r')
+  nb = NB.NetBlock(NB.OneDay/size)
+  nb.parse(pd.read_csv(f), grock)
+  print nb.data
+
+  exit
   # split on extra dimensions (weeks, ISP, etc)
   # split by initial netblock size(e.g. /10)
 
   # score all blocks
   # insert into rank queue
 
-  while not done:
-    pop highest rank block
-    split it on one bit
-    score each half
-    if scores are similar:
-      put parent on done list
-      discard children
-    else:
-      insert children into rank queue by score
+  # while not done:
+    # pop highest rank block
+    # split it on one bit
+    # score each half
+    # if scores are similar:
+      # put parent on done list
+     #  discard children
+    # else:
+      # insert children into rank queue by score
 
-    sort done queue
-    display top ranked netblocks
+    # sort done queue by rank
+    # display top ranked netblocks
+
+def score(nb):
+  de, te = nb.energy()
+  return int(-100 * math.log(de / te))
+
+
+if __name__ == "__main__":
+  main()
