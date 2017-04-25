@@ -26,9 +26,14 @@ import netblock as NB
 import energy
 import csv
 
+ALLCOLS = ['server_ip_v4', 'client_ip_v4', 'start_time', 'Duration',
+           'download_mbps', 'min_rtt', 'avg_rtt',
+           'retran_per_DataSegsOut', 'retran_per_CongSignals']
+
 def parse_row(nb, row, tb):
   row["clientIP"] = NB.inet_addr(row["client_ip_v4"])
   row[tb.bucket(row["start_time"])] = row["download_mbps"]
+#  row[tb.bucket(row["start_time"])] = row["avg_rtt"]
   return row
 
 def energy_mean_nan(nb, harmonics=2, method='ffill'):
@@ -37,24 +42,30 @@ def energy_mean_nan(nb, harmonics=2, method='ffill'):
   Returns a dictionary:
   e24 - energy at 1/(24hr) and selected harmonics
   te - total energy
+  ra = e24/te
+  nrows - Number of datapoints in the sample
+  nan - Number of time bins for which values had to be interpolated
   """
 
+  # Note that "mean" is not automatically correct.  Consider median, others
   timeseries = Series([nb.data[tt].mean() for tt in  nb.TBall])
   nan = nb.TB.bucketcount - timeseries.count()
   if method:
     timeseries = timeseries.fillna(method=method)
-    # TODO (mattmathis) exlore limit=
+    # TODO (mattmathis) exlore limit= options
   else:
+    # zero fill is only correct for energy algebra
     timeseries = [0.0 if np.isnan(tv) else tv for tv in timeseries]
   e24, te = energy.power_ratio(timeseries, len(timeseries), harmonics)
   try:
     ra = e24/te
   except:
-    # failed to fill all NaNs
+    # failed to fill all NaNs or other failure
     ra = float('nan')
   return { 'e24':e24, 'te':te, 'ra':ra, "nrows":len(nb.data), 'nan':nan }
 
 def rank(nb):
+  """Provide a preliminary estimate of interest"""
   e = nb.energy
   if e['nrows'] < nb.TB.bucketcount:
     return 1000
@@ -62,12 +73,22 @@ def rank(nb):
     return 1000
   return int(-100 * math.log10(e['ra']))
 
-def main():
-  # NB: division between ScoreFrame() and main() remains TBD
+def firstpass(remain, width=8, verbose=None):
+  while len(remain.data) > 0:
+    sn = NB.SubNet(width, remain.first_row().clientIP)
+    rowmask = remain.data.clientIP.apply(sn.match)
+    blk = remain.fork_block(sn, rowmask=rowmask)
+    if verbose:
+      print "Found:", blk.subnet.str(), \
+             len(rowmask), len(blk.data), blk.energy['ra'], blk.rank
+    NB.hpush(NB.NetBlock.todo, blk)
+    remain.data = remain.data[~(rowmask)]
+  return NB.NetBlock.todo
 
-  verbose = False
-  size = 12
-  Swidth = 8
+def main():
+  verbose = False   # chatter while you work
+  size = 12         # Number of time bins per day
+  Swidth = 8        # Initial/default netmask width
   file = "../data.csv"
   if (len(sys.argv) >= 2):
     file = sys.argv[1]
@@ -78,40 +99,13 @@ def main():
                    rank)
   alldata.parse(pd.read_csv(f),
                 downsample = 1000,
-                cols=['server_ip_v4', 'client_ip_v4',
-                      'start_time', 'Duration',
-                      'download_mbps', 'min_rtt', 'avg_rtt',
-                      'retran_per_DataSegsOut', 'retran_per_CongSignals'])
-  remain = alldata
-  while len(remain.data) > 0:
-    sn = NB.SubNet(Swidth, remain.first_row().clientIP)
-    rowmask = remain.data.clientIP.apply(sn.match)
-    blk = remain.fork_block(sn, rowmask=rowmask)
-    if verbose:
-      print "Found:", blk.subnet.str(), \
-             len(rowmask), len(blk.data), blk.energy['ra'], blk.rank
-    NB.hpush(NB.NetBlock.todo, blk)
-    remain.data = remain.data[~(rowmask)]
-
-  print len(NB.NetBlock.todo), "Total Blocks"
-  while len(NB.NetBlock.todo):
-    blk = NB.hpop(NB.NetBlock.todo)
+                cols = ALLCOLS)
+  todo = firstpass(alldata, width = Swidth)
+  print len(todo), "Total Blocks"
+  while len(todo):
+    blk = NB.hpop(todo)
     print blk.subnet.str(), len(blk.data), blk.energy, blk.rank
   exit(0)
-
-  # while not done:
-    # pop highest rank block
-    # split it on one bit
-    # score each half
-    # if scores are similar:
-      # put parent on done list
-     #  discard children
-    # else:
-      # insert children into rank queue by score
-
-    # sort done queue by rank
-    # display top ranked netblocks
-
 
 if __name__ == "__main__":
   main()
