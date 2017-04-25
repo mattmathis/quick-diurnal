@@ -29,15 +29,15 @@ def grok(row, tb):
   return row
 
 def parse_args():
-  from argparse import ArgumentParser
-  parser = ArgumentParser(
+  import argparse
+  parser = argparse.ArgumentParser(
       description="Analyze a bunch of data for diurnal signals")
-  parser.add_argument("--input", metavar="FILE", type=file,
-                      default=open("../data.csv"),
-                      description="The file to process")
+  parser.add_argument("--input", metavar="FILE", type=str,
+                      default="../data.csv",
+                      help="The file to process")
   parser.add_argument("--size", metavar="SIZE", type=int,
                       default=12,
-                      description="Buckets per day")
+                      help="Buckets per day")
   return parser.parse_args()
 
 
@@ -45,7 +45,7 @@ def main():
   # NB: division between ScoreFrame() and main() remains TBD
   args = parse_args()
   size = args.size
-  f = args.input
+  f = open(args.input)
   nb = NB.NetBlock(NB.OneDay/size)
   nb.parse(pd.read_csv(f), grok)
   print nb.data
