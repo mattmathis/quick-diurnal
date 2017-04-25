@@ -85,22 +85,35 @@ def firstpass(remain, width=8, verbose=None):
     remain.data = remain.data[~(rowmask)]
   return NB.NetBlock.todo
 
+def parse_args():
+  import argparse
+  parser = argparse.ArgumentParser(
+      description="Analyze a bunch of data for diurnal signals")
+  parser.add_argument("--input", metavar="FILE", type=str,
+                      default="../data.csv",
+                      help="The file to process")
+  parser.add_argument("--size", metavar="SIZE", type=int,
+                      default=12,
+                      help="Buckets per day")
+  parser.add_argument("--width", metavar="SIZE", type=int,
+                      default=8,
+                      help="Buckets per day")
+  parser.add_argument("--verbose", action='store_true',
+                      help="verbose flag")
+  return parser.parse_args()
+
+
 def main():
-  verbose = False   # chatter while you work
-  size = 12         # Number of time bins per day
-  Swidth = 8        # Initial/default netmask width
-  file = "../data.csv"
-  if (len(sys.argv) >= 2):
-    file = sys.argv[1]
-  f = open(file, 'r')
-  alldata = NB.NetBlock(NB.OneDay/size,
+  args = parse_args()
+  verbose = args.verbose
+  alldata = NB.NetBlock(NB.OneDay/args.size,
                    parse_row,
                    energy_mean_nan,
                    rank)
-  alldata.parse(pd.read_csv(f),
+  alldata.parse(pd.read_csv(open(args.input)),
                 downsample = 1000,
                 cols = ALLCOLS)
-  todo = firstpass(alldata, width = Swidth)
+  todo = firstpass(alldata, width = args.width, verbose=verbose)
   print len(todo), "Total Blocks"
   while len(todo):
     blk = NB.hpop(todo)
