@@ -24,17 +24,30 @@ import csv
 
 # ResultTable = ScoreFrame(...) # one row per block, columns by properties
 
-def grock(row, tb):
+def grok(row, tb):
   row[tb.bucket(row["start_time"])] = row["download_mbps"]
   return row
 
+def parse_args():
+  from argparse import ArgumentParser
+  parser = ArgumentParser(
+      description="Analyze a bunch of data for diurnal signals")
+  parser.add_argument("--input", metavar="FILE", type=file,
+                      default=open("../data.csv"),
+                      description="The file to process")
+  parser.add_argument("--size", metavar="SIZE", type=int,
+                      default=12,
+                      description="Buckets per day")
+  return parser.parse_args()
+
+
 def main():
   # NB: division between ScoreFrame() and main() remains TBD
-
-  size = 12
-  f = open("../data.csv", 'r')
+  args = parse_args()
+  size = args.size
+  f = args.input
   nb = NB.NetBlock(NB.OneDay/size)
-  nb.parse(pd.read_csv(f), grock)
+  nb.parse(pd.read_csv(f), grok)
   print nb.data
 
   exit
