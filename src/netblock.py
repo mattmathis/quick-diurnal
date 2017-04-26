@@ -91,6 +91,13 @@ class SubNet():
     """Display conventional prefix/len notation"""
     return "%s/%d"%(inet_ntoa(self.prefix), self.width)
 
+  def sstr(self):
+    """Display naked prefix (no len).  Drop trailing zeros"""
+    s = inet_ntoa(self.prefix)
+    while s[-2:] == '.0':
+      s = s[:-2]
+    return s
+
   def vstr(self):
     """Verbose display: prefix/len (netmask) - last"""
     return "%s/%d (%s) - %s"%(inet_ntoa(self.prefix),
@@ -176,8 +183,9 @@ class NetBlock():
     cols = NetBlock.TBall + cols
     self.data = pd.DataFrame(itr, columns = cols)
     if downsample > 1:
-       mask=pd.Series(np.random.randint(0, downsample, len(self.data)) == 0)
-       self.data = self.data[mask]
+      print "Warning %d:1 random down sampling"%downsample
+      mask=pd.Series(np.random.randint(0, downsample, len(self.data)) == 0)
+      self.data = self.data[mask]
     self.data = self.data.apply(self.canonF,
                                 axis = 'columns',
                                 raw = True,

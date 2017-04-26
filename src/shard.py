@@ -14,6 +14,9 @@
 # limitations under the License.
 """Quick Signal Searcher
 
+Shard the data by high bits (default to 8)
+
+We keep a computed summary scores for reference but strip added columns
 
 
 """
@@ -84,6 +87,7 @@ def firstpass(remain, width=8, verbose=None):
              len(rowmask), len(blk.data), blk.energy['ra'], blk.rank
     NB.hpush(NB.NetBlock.todo, blk)
     remain.data = remain.data[~(rowmask)]
+  print len(NB.NetBlock.todo)
   return NB.NetBlock.todo
 
 def parse_args():
@@ -110,6 +114,11 @@ def parse_args():
 def main():
   args = parse_args()
   verbose = args.verbose
+  basename = args.input
+  if basename[-4:] != '.csv':
+    print "Input file must be .csv"
+    exit (2)
+  basename = basename[:-4] + '.slice.'
   alldata = NB.NetBlock(NB.OneDay/args.size,
                    parse_row,
                    energy_mean_nan,
@@ -117,12 +126,30 @@ def main():
   alldata.parse(pd.read_csv(open(args.input)),
                 downsample = args.downsample,
                 cols = ALLCOLS)
-  todo = firstpass(alldata, width = args.width, verbose=verbose)
-  print len(todo), "Total Blocks"
-  while len(todo):
-    blk = NB.hpop(todo)
-    print blk.subnet.str(), len(blk.data), blk.energy, blk.rank
-  exit(0)
+  remain = alldata
+  while len(remain.data) > 0:
+    sn = NB.SubNet(args.width, remain.first_row().clientIP)
+    rowmask = remain.data.clientIP.apply(sn.match)
+    blk = remain.fork_block(sn, rowmask=rowmask)
+    if verbose:
+      print "Found:", blk.subnet.str(), \
+             len(rowmask), len(blk.data), blk.energy['ra'], blk.rank
+    NB.hpush(NB.NetBlock.todo, blk)
+    remain.data = remain.data[~(rowmask)]
+
+  summary = []
+  sumcols = ['subnet', 'nrows', 'nan', 'e24', 'te', 'ra', 'rank']
+  while len(NB.NetBlock.todo):
+    blk = NB.hpop(NB.NetBlock.todo)
+    ofile = basename + blk.subnet.sstr() + '.csv'
+    blk.data.to_csv(ofile, cols=ALLCOLS, index=False)
+    e =  {"subnet" : blk.subnet.str(), "rank": blk.rank }
+    e.update(blk.energy)
+    summary.append(e)
+  ofile = basename + 'summary.csv'
+  df = DataFrame(summary)
+  df = df.sort('nrows', ascending = False)
+  df.to_csv(ofile, cols=sumcols, index=False)
 
 if __name__ == "__main__":
   main()
