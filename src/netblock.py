@@ -78,7 +78,7 @@ class SubNet():
   def match(self, address):
     """Check if an address matches a subnet
 
-    NB: Match may be expanded inline for panda iterators
+    NB: Match may be expanded inline for pandas iterators
     """
     return (self.mask & address) == self.prefix
 
@@ -156,7 +156,9 @@ class NetBlock():
 
     canon(row) should include:
       row["clientIP"] = inet_addr(row["client_ip_v4"])
-      row[tb.bucket(row["start_time"])] = some_value
+      row["Value"] = some_value
+      row[tb.bucket(row["start_time"])] = row["Value"]
+    NB: clientIP, Value, start_time are accessed elsewhere
 
     """
     if timebucket != 0:
@@ -166,8 +168,7 @@ class NetBlock():
       NetBlock.energyF = energy
       NetBlock.rankF = rank     # optional
       if not (timebucket and canon and energy):
-        print "Missing argument(s) on first NetBlock()"
-        assert(False)
+        print "Warning: missing argument(s) on first NetBlock()"
 
   def parse(self, itr, cols=None, downsample=1):
     """Parse, canonicalize and score imported data into a NetBlock DataFrame
@@ -241,8 +242,55 @@ class NetBlock():
     self.subnet.width = neww - 1
     hpush(NetBlock.done, self)
 
+  def norm_spectra(self, harmonics=1):
+    """Compute the normalized frequency spectra
+
+    Returns summary statistics of the spectra in a dictionary.
+
+    harmonics - How many harmonics of (1/24h) to include
+    FUTURE: shuffle - shuffle the data to destroy any diurnal signals.
+            (For calibration experiments.)
+    Returns:
+    nrows: Number of rows in the original (raw) set
+    rawsum: Sum of raw values
+    mean: Mean of the raw values
+    nan: Number of time bins with no results
+    mag: Series of harmonics
+    sum24: Sum of selected harmonics
+    tsig: Sum of all frequiencies (excludes mean)
+    ratio: sum24/tsig
+
+    """
+
+    nrows = self.data["Value"].count()
+    assert nrows > 0
+    rawsum = self.data["Value"].sum()
+    mean = rawsum / nrows
+    timebuckets = Series([self.data[tt].sum() - mean*self.data[tt].count() \
+                  for tt in  NetBlock.TBall])
+    nan = len(timebuckets) - timebuckets.count()
+    if nan:
+      timebuckets = [0.0 if np.isnan(tv) else tv for tv in timebuckets]
+    spectrum = np.fft.rfft(timebuckets)
+    # phase = Series([phase(x) for x in spectrum]) - Not useful here
+    magnitude = Series([abs(x) for x in spectrum])
+    assert magnitude[0] < 0.0001 # Confirm proper sample pre bias
+    tsig = magnitude.sum()        # Total signal (excludes mean)
+    sum24 = 0.0                   # Energy at harmonics of 1/24h
+    for h in range(1, harmonics+1):
+      sum24 += magnitude[h*len(timebuckets)/NetBlock.TB.bucketcount]
+    try:
+      ratio = sum24/tsig
+    except:
+      # failed to fill all NaNs or other failures
+      ratio = float('nan')
+    return {'nrows':nrows, 'rawsum':rawsum, 'mean':mean, 'nan':nan, \
+            'mag':magnitude, 'sum24':sum24, 'tsig':tsig, 'ratio':ratio}
+
   def energy_sum_nan(self, harmonics=1):
     """Compute the energy of this NetBlock.
+
+    OBSOLETE See netblock.py::norm_spectra()
 
     Returns a 2tuple:
     energy at 1/(24hr) and selected harmonics
@@ -251,9 +299,9 @@ class NetBlock():
     NB: this may be superseded by a future summary function.
     """
 
-    timeseries = [self.data[tt].sum() for tt in  NetBlock.TBall]
-    timeseries = [0.0 if np.isnan(tv) else tv for tv in timeseries]
-    return power_ratio(timeseries, len(timeseries), harmonics)
+    timebuckets = [self.data[tt].sum() for tt in  NetBlock.TBall]
+    timebuckets = [0.0 if np.isnan(tv) else tv for tv in timebuckets]
+    return power_ratio(timebuckets, len(timebuckets), harmonics)
 
 
 ################################################################
@@ -270,8 +318,33 @@ def test_subnet_canon(nb, row, tb):
   row["clientIP"] = inet_addr(row["client_ip_v4"])
   return row
 
+def smear(seq):
+  """Spread a time series as one point per row in a NetBlock."""
+  return(pd.DataFrame({
+      "Value": pd.Series(seq),
+      "Time" : pd.Series(range(0, OneDay,OneDay/len(seq)))
+      }))
+
+def CheckVals(D, argdict):
+  """Check one dictionary against another
+
+  argdict is **kwargs in an outer context.
+  """
+  lim = 0.00001
+  r = True
+  if argdict is not None:
+    for key, val in argdict.iteritems():
+      if not key in D:
+        print "Key %s missing"%key
+        r = False
+      elif abs(D[key] - val) > lim:
+        print "Key %s %s != %s"%(key, D[key], val)
+        r = False
+  return (r)
+
 class Test_Netblock(unittest.TestCase):
 
+################
   def test_time2bucket(self):
     tb = TimeBucket(300)
     self.assertEqual(tb.bucket(0), "T00:00")
@@ -286,6 +359,7 @@ class Test_Netblock(unittest.TestCase):
     self.assertEqual(all[1], "T00:05")
     self.assertEqual(len(all), OneDay / 300)
 
+################
   def test_IPaddr(self):
     self.assertEqual(inet_addr('192.168.4.54'), 3232236598)
     self.assertEqual(inet_ntoa(3232236598), '192.168.4.54')
@@ -296,14 +370,9 @@ class Test_Netblock(unittest.TestCase):
     self.assertTrue(sn.match(inet_addr('192.168.1.2')))
     self.assertFalse(sn.match(inet_addr('192.169.1.2')))
 
+################
   def test_netblock_energy(self):
-    def smear(seq):
-      """Spread a time series as one point per row in a NetBlock."""
-      return(pd.DataFrame({
-          "Value": pd.Series(seq),
-          "Time" : pd.Series(range(0, OneDay,OneDay/len(seq)))
-      }))
-
+    """OBSOLETE"""
     def approxEQ(c, p, tp):  # Copied from TestEnergy in energy.py
       """Result tester for power_ratio()
       c: Two tuple from power_ratio() above
@@ -331,7 +400,29 @@ class Test_Netblock(unittest.TestCase):
                              0, ss2))
     self.assertTrue(approxEQ(nb.parse(smear(sinewave2)).energy_sum_nan(2),
                              ss2, ss2))
+################
+  def AssertSectraVals(self, nb, seq, harm, **kwargs):
+    nb.parse(smear(seq))
+    self.assertTrue(CheckVals(nb.norm_spectra(harm), kwargs))
 
+  def test_netblock_spectra(self):
+    size = 24*12
+    uniform = Series([1.0 for t in range(size)])
+    sinewave1 = Series([math.sin((math.pi*2*t)/size) for t in range(size)])
+    sinewave2 = Series([math.sin((math.pi*4*t)/size) for t in range(size)])
+    impulse = Series([0.0 for t in range(size)])
+    impulse[0] = 1.0
+    inan =  Series([float('nan') for t in range(size)])
+    inan[0] = 1.0
+    ss2=size/2 # expected power for sine signals
+    sqrt2 = math.sqrt(2.0)
+    nb = NetBlock(OneDay/size, test_energy_canon, True, True)
+    self.AssertSectraVals(nb, uniform, 1, \
+                          nrows=size, rawsum=size, mean=1.0, nan=0, sum24=0, tsig=0)
+    self.AssertSectraVals(nb, sinewave1, 1, \
+                          nrows=size, rawsum=0.0, mean=0.0, nan=0, sum24=ss2, tsig=ss2)
+
+################
   def test_netblock_subnets(self):
     def test_rank(nb):
       return nb.first_row().score

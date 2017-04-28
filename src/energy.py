@@ -31,6 +31,8 @@ import math
 def power_ratio(timeseries, period, harmonics=1):
   """Compute the energy at the period and harmonics
 
+  OBSOLETE See netblock.py::norm_spectra()
+
   Args:
     timeseries: A list of uniformly spaced data points.
     period: The number of bins per cycle.
@@ -62,6 +64,8 @@ def power_ratio(timeseries, period, harmonics=1):
 
 def new_power(timeseries, period, harmonics=1):
   """Compute the energy at the period and harmonics
+
+  OBSOLETE See netblock.py::norm_spectra()
 
   NOTE THIS IS NOT (QUITE) THE RIGHT APPROACH.
 
