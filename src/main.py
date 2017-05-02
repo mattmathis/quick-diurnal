@@ -32,13 +32,14 @@ ALLCOLS = ['server_ip_v4', 'client_ip_v4', 'start_time', 'Duration',
 
 def parse_row(nb, row, tb):
   row["clientIP"] = NB.inet_addr(row["client_ip_v4"])
-  row[tb.bucket(row["start_time"])] = row["download_mbps"]
+  row["Value"] = row["download_mbps"]
+  row[tb.bucket(row["start_time"])] = row["Value"]
 #  row[tb.bucket(row["start_time"])] = row["avg_rtt"]
   return row
 
 def energy_mean_nan(nb, harmonics=2, method='ffill'):
   """Compute the energy of this NetBlock.
-
+  OBSOLETE: use netblock.py::norm_spectra
   Returns a dictionary:
   e24 - energy at 1/(24hr) and selected harmonics
   te - total energy
@@ -69,9 +70,9 @@ def rank(nb):
   e = nb.energy
   if e['nrows'] < nb.TB.bucketcount:
     return 1000
-  if np.isnan(e['ra']):
+  if np.isnan(e['ratio']):
     return 1000
-  return int(-100 * math.log10(e['ra']))
+  return -100 * math.log10(e['ratio'])
 
 # TODO move this into the netblock class
 def firstpass(remain, width=8, verbose=None):
@@ -112,7 +113,7 @@ def main():
   verbose = args.verbose
   alldata = NB.NetBlock(NB.OneDay/args.size,
                    parse_row,
-                   energy_mean_nan,
+                   NB.NetBlock.norm_spectra,
                    rank)
   alldata.parse(pd.read_csv(open(args.input)),
                 downsample = args.downsample,
@@ -121,6 +122,7 @@ def main():
   print len(todo), "Total Blocks"
   while len(todo):
     blk = NB.hpop(todo)
+    del blk.energy["mag"]
     print blk.subnet.str(), len(blk.data), blk.energy, blk.rank
   exit(0)
 

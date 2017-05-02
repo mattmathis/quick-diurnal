@@ -21,6 +21,9 @@ for some parameters, such as traffic volumes.  However it is not
 expected for performance signals that arise from edge networks.
 
 This is intended to be used as a library.  If run directly, it does a unit test.
+
+This entire module has been superceeded by netblock.py::norm_spectra()
+
 """
 
 import datetime
@@ -52,6 +55,7 @@ def power_ratio(timeseries, period, harmonics=1):
   for the caller to implement gradient assent algorithms.
   """
 
+  print "energy.py::power_ratio is obsolete"
   if len(timeseries)%period != 0:
     return False
   spectrum = numpy.fft.rfft(timeseries)
@@ -90,7 +94,7 @@ def new_power(timeseries, period, harmonics=1):
   We expose the numerator and denominator separately to make it easier
   for the caller to implement gradient assent algorithms.
   """
-
+  print "energy.py::new_power is obsolete"
   if len(timeseries)%period != 0:
     return False
 

@@ -20,6 +20,7 @@ from pandas import DataFrame, Series
 import pandas as pd
 import numpy as np
 import math
+import random
 from energy import power_ratio
 
 ################################################################
@@ -134,7 +135,7 @@ class NetBlock():
     .energy - computed energies for this NetBlock
     .rank - Priority for recursive processing
 
-  TODO: It might be more effient to use panels within one netframe.
+  TODO: It might be more efficient to use panels within one netframe.
   """
   # Invariant after first instantiation
   timebucket = None
@@ -242,14 +243,18 @@ class NetBlock():
     self.subnet.width = neww - 1
     hpush(NetBlock.done, self)
 
-  def norm_spectra(self, harmonics=1):
+  def norm_spectra(self, harmonics=1, shuffle=0):
     """Compute the normalized frequency spectra
 
     Returns summary statistics of the spectra in a dictionary.
 
     harmonics - How many harmonics of (1/24h) to include
-    FUTURE: shuffle - shuffle the data to destroy any diurnal signals.
+    shuffle - shuffle the data to destroy all diurnal signals.
+       shuffle=None: Use fast algorithm
+       shuffle=1: Use isomorphic slow algorithm
+       shuffle=2: Shuffle the raw data
             (For calibration experiments.)
+       TODO (mattmathis): Write and debug test code
     Returns:
     nrows: Number of rows in the original (raw) set
     rawsum: Sum of raw values
@@ -257,35 +262,51 @@ class NetBlock():
     nan: Number of time bins with no results
     mag: Series of harmonics
     sum24: Sum of selected harmonics
-    tsig: Sum of all frequiencies (excludes mean)
+    tsig: Sum of all frequencies (excludes mean)
     ratio: sum24/tsig
+    nratio: sum24/tsig / harmonics/size  E(nratio) == 1.0 for random data
 
     """
-
+    size = NetBlock.TB.bucketcount
+    scale = 2.0/size # scale factor for normalizing magnitudes
     nrows = self.data["Value"].count()
     assert nrows > 0
     rawsum = self.data["Value"].sum()
     mean = rawsum / nrows
-    timebuckets = Series([self.data[tt].sum() - mean*self.data[tt].count() \
+    if shuffle:
+      dataseries = self.data["Value"].reset_index(drop=True)
+      if shuffle > 1:
+        random.shuffle(dataseries)
+        dataseries = dataseries.reset_index(drop=True)
+      timeseries = self.data["start_time"].reset_index(drop=True)
+      assert len(dataseries) == len(timeseries)
+      bucketseries = Series((timeseries % OneDay) / self.TB.bucketsize, dtype=int)
+      timebuckets = Series([np.nan for i in range(size)])
+      for i in range(size):
+        tmp = dataseries[bucketseries == i]
+        timebuckets[i] = tmp.sum() - mean*tmp.count()
+    else:
+      timebuckets = Series([self.data[tt].sum() - mean*self.data[tt].count() \
                   for tt in  NetBlock.TBall])
     nan = len(timebuckets) - timebuckets.count()
     if nan:
       timebuckets = [0.0 if np.isnan(tv) else tv for tv in timebuckets]
     spectrum = np.fft.rfft(timebuckets)
+    magnitude = Series([abs(x)*scale for x in spectrum])
     # phase = Series([phase(x) for x in spectrum]) - Not useful here
-    magnitude = Series([abs(x) for x in spectrum])
-    assert magnitude[0] < 0.0001 # Confirm proper sample pre bias
+    assert magnitude[0] < 0.0001 # Confirm proper pre bias
     tsig = magnitude.sum()        # Total signal (excludes mean)
     sum24 = 0.0                   # Energy at harmonics of 1/24h
     for h in range(1, harmonics+1):
       sum24 += magnitude[h*len(timebuckets)/NetBlock.TB.bucketcount]
     try:
       ratio = sum24/tsig
+      nratio = ratio * size/harmonics
     except:
       # failed to fill all NaNs or other failures
       ratio = float('nan')
     return {'nrows':nrows, 'rawsum':rawsum, 'mean':mean, 'nan':nan, \
-            'mag':magnitude, 'sum24':sum24, 'tsig':tsig, 'ratio':ratio}
+            'mag':magnitude, 'sum24':sum24, 'tsig':tsig, 'ratio':ratio, 'nratio':nratio}
 
   def energy_sum_nan(self, harmonics=1):
     """Compute the energy of this NetBlock.
@@ -337,6 +358,8 @@ def CheckVals(D, argdict):
       if not key in D:
         print "Key %s missing"%key
         r = False
+      elif val is None:
+        print "Show key %s is %s"%(key, D[key])
       elif abs(D[key] - val) > lim:
         print "Key %s %s != %s"%(key, D[key], val)
         r = False
@@ -407,20 +430,35 @@ class Test_Netblock(unittest.TestCase):
 
   def test_netblock_spectra(self):
     size = 24*12
+    nb = NetBlock(OneDay/size, test_energy_canon, True, True)
     uniform = Series([1.0 for t in range(size)])
+    self.AssertSectraVals(nb, uniform, 1, \
+                          nrows=size, rawsum=size, mean=1.0, nan=0, sum24=0.0, tsig=0.0)
     sinewave1 = Series([math.sin((math.pi*2*t)/size) for t in range(size)])
+    self.AssertSectraVals(nb, sinewave1, 1, \
+                          nrows=size, rawsum=0.0, mean=0.0, nan=0, sum24=1.0, tsig=1.0, ratio=1.0)
     sinewave2 = Series([math.sin((math.pi*4*t)/size) for t in range(size)])
+    self.AssertSectraVals(nb, sinewave2, 1, sum24=0.0, tsig=1.0)
+    self.AssertSectraVals(nb, sinewave2, 2, sum24=1.0, tsig=1.0)
+    self.AssertSectraVals(nb, sinewave2, 3, sum24=1.0, tsig=1.0)
     impulse = Series([0.0 for t in range(size)])
     impulse[0] = 1.0
+    self.AssertSectraVals(nb, impulse, 1, sum24=2.0*1/size, tsig=1.0, ratio=2.0*1/size)
+    self.AssertSectraVals(nb, impulse, 2, sum24=2.0*2/size, tsig=1.0, ratio=2.0*2/size)
+    self.AssertSectraVals(nb, impulse, 3, sum24=2.0*3/size, tsig=1.0, ratio=2.0*3/size)
+    self.AssertSectraVals(nb, impulse, 4, sum24=2.0*4/size, tsig=1.0, ratio=2.0*4/size)
     inan =  Series([float('nan') for t in range(size)])
     inan[0] = 1.0
-    ss2=size/2 # expected power for sine signals
-    sqrt2 = math.sqrt(2.0)
-    nb = NetBlock(OneDay/size, test_energy_canon, True, True)
-    self.AssertSectraVals(nb, uniform, 1, \
-                          nrows=size, rawsum=size, mean=1.0, nan=0, sum24=0, tsig=0)
-    self.AssertSectraVals(nb, sinewave1, 1, \
-                          nrows=size, rawsum=0.0, mean=0.0, nan=0, sum24=ss2, tsig=ss2)
+    self.AssertSectraVals(nb, inan, 1, \
+                          nrows=1, rawsum=1.0, mean=1.0, nan=size-1, sum24=0.0, tsig=0.0)
+    inan =  Series([float('nan') for t in range(size)])
+    inan[0] = 1.0
+    inan[1] = -1.0
+    self.AssertSectraVals(nb, inan, 1, \
+                          nrows=2, rawsum=0.0, mean=0.0, nan=size-2)
+    # TODO Understand and model sum24 and tsig for the above case (and add more)
+    # TODO (Monte Carlo) Proof that for random data E(ratio) = num_harmonics/size
+    # TODO model for Var(Ratio) as a function of Var(data)
 
 ################
   def test_netblock_subnets(self):
