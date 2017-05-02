@@ -35,46 +35,19 @@ ALLCOLS = ['server_ip_v4', 'client_ip_v4', 'start_time', 'Duration',
 
 def parse_row(nb, row, tb):
   row["clientIP"] = NB.inet_addr(row["client_ip_v4"])
-  row[tb.bucket(row["start_time"])] = row["download_mbps"]
+  row["Value"] = row["download_mbps"]
+  row[tb.bucket(row["start_time"])] = row["Value"]
 #  row[tb.bucket(row["start_time"])] = row["avg_rtt"]
   return row
-
-def energy_mean_nan(nb, harmonics=2, method='ffill'):
-  """Compute the energy of this NetBlock.
-
-  Returns a dictionary:
-  e24 - energy at 1/(24hr) and selected harmonics
-  te - total energy
-  ra = e24/te
-  nrows - Number of datapoints in the sample
-  nan - Number of time bins for which values had to be interpolated
-  """
-
-  # Note that "mean" is not automatically correct.  Consider median, others
-  timeseries = Series([nb.data[tt].mean() for tt in  nb.TBall])
-  nan = nb.TB.bucketcount - timeseries.count()
-  if method:
-    timeseries = timeseries.fillna(method=method)
-    # TODO (mattmathis) exlore limit= options
-  else:
-    # zero fill is only correct for energy algebra
-    timeseries = [0.0 if np.isnan(tv) else tv for tv in timeseries]
-  e24, te = energy.power_ratio(timeseries, len(timeseries), harmonics)
-  try:
-    ra = e24/te
-  except:
-    # failed to fill all NaNs or other failure
-    ra = float('nan')
-  return { 'e24':e24, 'te':te, 'ra':ra, "nrows":len(nb.data), 'nan':nan }
 
 def rank(nb):
   """Provide a preliminary estimate of interest"""
   e = nb.energy
   if e['nrows'] < nb.TB.bucketcount:
     return 1000
-  if np.isnan(e['ra']):
+  if np.isnan(e['ratio']):
     return 1000
-  return int(-100 * math.log10(e['ra']))
+  return (-100 * math.log10(e['ratio']))
 
 # TODO move this into the netblock class
 def firstpass(remain, width=8, verbose=None):
@@ -84,7 +57,7 @@ def firstpass(remain, width=8, verbose=None):
     blk = remain.fork_block(sn, rowmask=rowmask)
     if verbose:
       print "Found:", blk.subnet.str(), \
-             len(rowmask), len(blk.data), blk.energy['ra'], blk.rank
+             len(rowmask), len(blk.data), blk.energy['ratio'], blk.rank
     NB.hpush(NB.NetBlock.todo, blk)
     remain.data = remain.data[~(rowmask)]
   print len(NB.NetBlock.todo)
@@ -121,8 +94,8 @@ def main():
   basename = basename[:-4] + '.slice.'
   alldata = NB.NetBlock(NB.OneDay/args.size,
                    parse_row,
-                   energy_mean_nan,
-                   rank)
+                   NB.NetBlock.norm_spectra,
+                   rank=rank)
   alldata.parse(pd.read_csv(open(args.input)),
                 downsample = args.downsample,
                 cols = ALLCOLS)
@@ -133,12 +106,12 @@ def main():
     blk = remain.fork_block(sn, rowmask=rowmask)
     if verbose:
       print "Found:", blk.subnet.str(), \
-             len(rowmask), len(blk.data), blk.energy['ra'], blk.rank
+             len(rowmask), len(blk.data), blk.energy['ratio'], blk.rank
     NB.hpush(NB.NetBlock.todo, blk)
     remain.data = remain.data[~(rowmask)]
 
   summary = []
-  sumcols = ['subnet', 'nrows', 'nan', 'e24', 'te', 'ra', 'rank']
+  sumcols = ['subnet', 'nrows', 'nan', 'sum24', 'tsig', 'ratio', 'rank']
   while len(NB.NetBlock.todo):
     blk = NB.hpop(NB.NetBlock.todo)
     ofile = basename + blk.subnet.sstr() + '.csv'

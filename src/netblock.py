@@ -21,7 +21,6 @@ import pandas as pd
 import numpy as np
 import math
 import random
-from energy import power_ratio
 
 ################################################################
 # Some helper classes and functions
@@ -270,7 +269,8 @@ class NetBlock():
     size = NetBlock.TB.bucketcount
     scale = 2.0/size # scale factor for normalizing magnitudes
     nrows = self.data["Value"].count()
-    assert nrows > 0
+    if nrows < 1:
+      return {'nrows':nrows}
     rawsum = self.data["Value"].sum()
     mean = rawsum / nrows
     if shuffle:
@@ -308,23 +308,6 @@ class NetBlock():
     return {'nrows':nrows, 'rawsum':rawsum, 'mean':mean, 'nan':nan, \
             'mag':magnitude, 'sum24':sum24, 'tsig':tsig, 'ratio':ratio, 'nratio':nratio}
 
-  def energy_sum_nan(self, harmonics=1):
-    """Compute the energy of this NetBlock.
-
-    OBSOLETE See netblock.py::norm_spectra()
-
-    Returns a 2tuple:
-    energy at 1/(24hr) and selected harmonics
-    total energy
-
-    NB: this may be superseded by a future summary function.
-    """
-
-    timebuckets = [self.data[tt].sum() for tt in  NetBlock.TBall]
-    timebuckets = [0.0 if np.isnan(tv) else tv for tv in timebuckets]
-    return power_ratio(timebuckets, len(timebuckets), harmonics)
-
-
 ################################################################
 # built in testers
 
@@ -336,6 +319,7 @@ def test_energy_canon(nb, row, tb):
 
 def test_subnet_canon(nb, row, tb):
   """Test helper to do minimal result canonicalization"""
+  row["Value"] = np.nan
   row["clientIP"] = inet_addr(row["client_ip_v4"])
   return row
 
@@ -394,36 +378,6 @@ class Test_Netblock(unittest.TestCase):
     self.assertFalse(sn.match(inet_addr('192.169.1.2')))
 
 ################
-  def test_netblock_energy(self):
-    """OBSOLETE"""
-    def approxEQ(c, p, tp):  # Copied from TestEnergy in energy.py
-      """Result tester for power_ratio()
-      c: Two tuple from power_ratio() above
-      p: Computed power at 1/(20h) and harmonics
-      tp: Computed total power
-
-      Returns True if both values agree within lim
-      """
-      lim = 0.00001
-      cp, ctp = c
-      return ((cp-p)<lim) and ((ctp-tp)<lim)
-
-    size = 6
-    ss2 = size*size/4 # TODO(mattmathis) why /4?
-    nb = NetBlock(OneDay/size,
-                  test_energy_canon,
-                  NetBlock.energy_sum_nan,
-                  None)
-    # test cases from TestEnergy in energy.py
-    sinewave1 = [math.sin((math.pi*2*t)/size) for t in range(size)]
-    sinewave2 = [math.sin((math.pi*4*t)/size) for t in range(size)]
-    self.assertTrue(approxEQ(nb.parse(smear(sinewave1)).energy_sum_nan(),
-                             ss2, ss2))
-    self.assertTrue(approxEQ(nb.parse(smear(sinewave2)).energy_sum_nan(),
-                             0, ss2))
-    self.assertTrue(approxEQ(nb.parse(smear(sinewave2)).energy_sum_nan(2),
-                             ss2, ss2))
-################
   def AssertSectraVals(self, nb, seq, harm, **kwargs):
     nb.parse(smear(seq))
     self.assertTrue(CheckVals(nb.norm_spectra(harm), kwargs))
@@ -476,7 +430,7 @@ class Test_Netblock(unittest.TestCase):
 
     parent = NetBlock(OneDay/8,
                   test_subnet_canon,
-                  NetBlock.energy_sum_nan,
+                  NetBlock.norm_spectra,
                   test_rank)
     # All rawdata got parsed
     parent.parse(rawdata)
