@@ -242,18 +242,19 @@ class NetBlock():
     self.subnet.width = neww - 1
     hpush(NetBlock.done, self)
 
-  def norm_spectra(self, harmonics=1, shuffle=0):
+  def norm_spectra(self, harmonics=1, shuffle=0, power=False):
     """Compute the normalized frequency spectra
 
     Returns summary statistics of the spectra in a dictionary.
 
     harmonics - How many harmonics of (1/24h) to include
     shuffle - shuffle the data to destroy all diurnal signals.
-       shuffle=None: Use fast algorithm
+       shuffle=0: Use fast algorithm
        shuffle=1: Use isomorphic slow algorithm
        shuffle=2: Shuffle the raw data
             (For calibration experiments.)
-       TODO (mattmathis): Write and debug test code
+    power - compute total signal power at multiple stages
+
     Returns:
     nrows: Number of rows in the original (raw) set
     rawsum: Sum of raw values
@@ -264,21 +265,27 @@ class NetBlock():
     tsig: Sum of all frequencies (excludes mean)
     ratio: sum24/tsig
     nratio: sum24/tsig / harmonics/size  E(nratio) == 1.0 for random data
+    if power is True, also return:
+      rawpower - Power directly computed from the input data
+      bktpower - power computed after reduction to one diurnal series
+      spectrapower - computed from the coefficients
+      NB: In theory all three should be the same but since we have non-periodic
+      data but only periodic spectral frequencies, the energies do not match.
 
     """
     size = NetBlock.TB.bucketcount
-    scale = 2.0/size # scale factor for normalizing magnitudes
+    scale1 = 2.0/size # scale factor for normalizing signal
     nrows = self.data["Value"].count()
     if nrows < 1:
       return {'nrows':nrows}
     rawsum = self.data["Value"].sum()
     mean = rawsum / nrows
     if shuffle:
+      timeseries = self.data["start_time"].reset_index(drop=True)
       dataseries = self.data["Value"].reset_index(drop=True)
       if shuffle > 1:
         random.shuffle(dataseries)
         dataseries = dataseries.reset_index(drop=True)
-      timeseries = self.data["start_time"].reset_index(drop=True)
       assert len(dataseries) == len(timeseries)
       bucketseries = Series((timeseries % OneDay) / self.TB.bucketsize, dtype=int)
       timebuckets = Series([np.nan for i in range(size)])
@@ -292,21 +299,28 @@ class NetBlock():
     if nan:
       timebuckets = [0.0 if np.isnan(tv) else tv for tv in timebuckets]
     spectrum = np.fft.rfft(timebuckets)
-    magnitude = Series([abs(x)*scale for x in spectrum])
+    magnitude = Series([abs(x)*scale1 for x in spectrum])
     # phase = Series([phase(x) for x in spectrum]) - Not useful here
     assert magnitude[0] < 0.0001 # Confirm proper pre bias
     tsig = magnitude.sum()        # Total signal (excludes mean)
-    sum24 = 0.0                   # Energy at harmonics of 1/24h
-    for h in range(1, harmonics+1):
-      sum24 += magnitude[h*len(timebuckets)/NetBlock.TB.bucketcount]
+    sum24 = magnitude[1:harmonics+1].sum()
     try:
       ratio = sum24/tsig
       nratio = ratio * size/harmonics
     except:
       # failed to fill all NaNs or other failures
-      ratio = float('nan')
-    return {'nrows':nrows, 'rawsum':rawsum, 'mean':mean, 'nan':nan, \
+      ratio = np.nan
+      nratio = np.nan
+    ret = {'nrows':nrows, 'rawsum':rawsum, 'mean':mean, 'nan':nan, \
             'mag':magnitude, 'sum24':sum24, 'tsig':tsig, 'ratio':ratio, 'nratio':nratio}
+    if power:
+      scale2 = size/2.0
+      rawpower = sum([x*x for x in self.data["Value"]])
+      bktpower = sum([x*x for x in timebuckets]) + mean*mean*size
+      spectrapower = sum([x*x for x in magnitude])*scale2 + mean*mean*size
+      pratio = spectrapower/bktpower
+      ret.update({'rawpower':rawpower, 'bktpower':bktpower, 'spectrapower':spectrapower, 'pratio':pratio,})
+    return ret
 
 ################################################################
 # built in testers
@@ -314,7 +328,7 @@ class NetBlock():
 # Helpers first
 def test_energy_canon(nb, row, tb):
   """Test helper to do minimal result canonicalization"""
-  row[tb.bucket(row["Time"])] = row["Value"]
+  row[tb.bucket(row["start_time"])] = row["Value"]
   return row
 
 def test_subnet_canon(nb, row, tb):
@@ -323,11 +337,19 @@ def test_subnet_canon(nb, row, tb):
   row["clientIP"] = inet_addr(row["client_ip_v4"])
   return row
 
+def test_parse_row(nb, row, tb):
+  """Minimal parser for real data"""
+  row["clientIP"] = inet_addr(row["client_ip_v4"])
+  row["Value"] = max(row["download_mbps"], 20.0)
+  row[tb.bucket(row["start_time"])] = row["Value"]
+#  row[tb.bucket(row["start_time"])] = row["avg_rtt"]
+  return row
+
 def smear(seq):
   """Spread a time series as one point per row in a NetBlock."""
   return(pd.DataFrame({
       "Value": pd.Series(seq),
-      "Time" : pd.Series(range(0, OneDay,OneDay/len(seq)))
+      "start_time" : pd.Series(range(0, OneDay,OneDay/len(seq))),
       }))
 
 def CheckVals(D, argdict):
@@ -380,9 +402,10 @@ class Test_Netblock(unittest.TestCase):
 ################
   def AssertSectraVals(self, nb, seq, harm, **kwargs):
     nb.parse(smear(seq))
-    self.assertTrue(CheckVals(nb.norm_spectra(harm), kwargs))
+    self.assertTrue(CheckVals(nb.norm_spectra(harm, power=True), kwargs))
 
   def test_netblock_spectra(self):
+    """Test spectra using known functions."""
     size = 24*12
     nb = NetBlock(OneDay/size, test_energy_canon, True, True)
     uniform = Series([1.0 for t in range(size)])
@@ -390,6 +413,7 @@ class Test_Netblock(unittest.TestCase):
                           nrows=size, rawsum=size, mean=1.0, nan=0, sum24=0.0, tsig=0.0)
     sinewave1 = Series([math.sin((math.pi*2*t)/size) for t in range(size)])
     self.AssertSectraVals(nb, sinewave1, 1, \
+                          rawpower=size/2.0, bktpower=size/2.0, spectrapower=size/2.0, \
                           nrows=size, rawsum=0.0, mean=0.0, nan=0, sum24=1.0, tsig=1.0, ratio=1.0)
     sinewave2 = Series([math.sin((math.pi*4*t)/size) for t in range(size)])
     self.AssertSectraVals(nb, sinewave2, 1, sum24=0.0, tsig=1.0)
@@ -397,15 +421,16 @@ class Test_Netblock(unittest.TestCase):
     self.AssertSectraVals(nb, sinewave2, 3, sum24=1.0, tsig=1.0)
     impulse = Series([0.0 for t in range(size)])
     impulse[0] = 1.0
+    self.AssertSectraVals(nb, impulse, 1, rawpower=1.0, bktpower=1.0, spectrapower=1.0034722)
     self.AssertSectraVals(nb, impulse, 1, sum24=2.0*1/size, tsig=1.0, ratio=2.0*1/size)
     self.AssertSectraVals(nb, impulse, 2, sum24=2.0*2/size, tsig=1.0, ratio=2.0*2/size)
     self.AssertSectraVals(nb, impulse, 3, sum24=2.0*3/size, tsig=1.0, ratio=2.0*3/size)
     self.AssertSectraVals(nb, impulse, 4, sum24=2.0*4/size, tsig=1.0, ratio=2.0*4/size)
-    inan =  Series([float('nan') for t in range(size)])
+    inan =  Series([np.nan for t in range(size)])
     inan[0] = 1.0
     self.AssertSectraVals(nb, inan, 1, \
                           nrows=1, rawsum=1.0, mean=1.0, nan=size-1, sum24=0.0, tsig=0.0)
-    inan =  Series([float('nan') for t in range(size)])
+    inan =  Series([np.nan for t in range(size)])
     inan[0] = 1.0
     inan[1] = -1.0
     self.AssertSectraVals(nb, inan, 1, \
@@ -413,6 +438,28 @@ class Test_Netblock(unittest.TestCase):
     # TODO Understand and model sum24 and tsig for the above case (and add more)
     # TODO (Monte Carlo) Proof that for random data E(ratio) = num_harmonics/size
     # TODO model for Var(Ratio) as a function of Var(data)
+
+  def Xtest_netblock_specta_properties(self):
+    """Confirm spectra properties on authentic data.
+
+    This test does not work well enough to be useful.
+
+    We need to understand how shuffling the data effects spectra variance.
+    """
+    return # @@@@@@ FIXME
+
+    buckets = 24*1
+
+    testdata = NetBlock(OneDay/buckets, test_parse_row)
+    testdata.parse(pd.read_csv(open("testdata.csv")), downsample=1)
+
+    fmt = "{mean} {rawpower} {bktpower} {spectrapower} {pratio} {sum24} {tsig} {ratio} {nratio}"
+    print "    "+fmt
+    print "s=0 "+fmt.format(**testdata.norm_spectra(shuffle=1, power=True))
+    print "s=1 "+fmt.format(**testdata.norm_spectra(shuffle=1, power=True))
+    for i in range(10):
+      s=testdata.norm_spectra(shuffle=2, power=True)
+      print "s=2 "+fmt.format(**s)
 
 ################
   def test_netblock_subnets(self):
