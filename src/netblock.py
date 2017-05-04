@@ -27,6 +27,8 @@ import random
 
 ################ Time Buckets
 OneDay = 86400          # seconds per day
+OneWeek = 7*OneDay      # seconds per week
+Sunday = 3*OneDay       # Unix time 'Sun, 04 Jan 1970 00:00:00 +0000'
 
 class TimeBucket():
   """Tag tests by time, rounded into buckets.
@@ -48,7 +50,7 @@ class TimeBucket():
   def bucket(self,time):
     """Convert seconds to a bucket name string: T00:00 - T23:59 """
 
-    bucket = ((time / self.bucketsize) * self.bucketsize) % OneDay
+    bucket = (int(time / self.bucketsize) * self.bucketsize) % OneDay
     return "T%02d:%02d"%(bucket/3600, (bucket/60)%60)
 
 ################ IP address and subnet tools
@@ -156,9 +158,11 @@ class NetBlock():
 
     canon(row) should include:
       row["clientIP"] = inet_addr(row["client_ip_v4"])
+      row["Time"] = int(row["start_time"]/1000000)
+      row["Week"] = int((row["Time"]-Sunday)/OneWeek)*OneWeek
       row["Value"] = some_value
-      row[tb.bucket(row["start_time"])] = row["Value"]
-    NB: clientIP, Value, start_time are accessed elsewhere
+      row[tb.bucket(row["Time"])] = row["Value"]
+    NB: clientIP, Time, Week and Value, are accessed elsewhere
 
     """
     if timebucket != 0:
@@ -281,7 +285,7 @@ class NetBlock():
     rawsum = self.data["Value"].sum()
     mean = rawsum / nrows
     if shuffle:
-      timeseries = self.data["start_time"].reset_index(drop=True)
+      timeseries = self.data["Time"].reset_index(drop=True)
       dataseries = self.data["Value"].reset_index(drop=True)
       if shuffle > 1:
         random.shuffle(dataseries)
@@ -328,7 +332,7 @@ class NetBlock():
 # Helpers first
 def test_energy_canon(nb, row, tb):
   """Test helper to do minimal result canonicalization"""
-  row[tb.bucket(row["start_time"])] = row["Value"]
+  row[tb.bucket(row["Time"])] = row["Value"]
   return row
 
 def test_subnet_canon(nb, row, tb):
@@ -340,16 +344,15 @@ def test_subnet_canon(nb, row, tb):
 def test_parse_row(nb, row, tb):
   """Minimal parser for real data"""
   row["clientIP"] = inet_addr(row["client_ip_v4"])
-  row["Value"] = max(row["download_mbps"], 20.0)
-  row[tb.bucket(row["start_time"])] = row["Value"]
-#  row[tb.bucket(row["start_time"])] = row["avg_rtt"]
+  row["Value"] = row["download_mbps"]
+  row[tb.bucket(row["Time"])] = row["Value"]
   return row
 
 def smear(seq):
   """Spread a time series as one point per row in a NetBlock."""
   return(pd.DataFrame({
       "Value": pd.Series(seq),
-      "start_time" : pd.Series(range(0, OneDay,OneDay/len(seq))),
+      "Time" : pd.Series(range(0, OneDay,OneDay/len(seq))),
       }))
 
 def CheckVals(D, argdict):

@@ -35,46 +35,38 @@ ALLCOLS = ['server_ip_v4', 'client_ip_v4', 'start_time', 'Duration',
 
 def parse_row(nb, row, tb):
   row["clientIP"] = NB.inet_addr(row["client_ip_v4"])
-  row["Value"] = row["download_mbps"]
-  row[tb.bucket(row["start_time"])] = row["Value"]
-#  row[tb.bucket(row["start_time"])] = row["avg_rtt"]
+  row["Time"] = int(row["start_time"]/1000000)
+  row["Week"] = int((row["Time"]-NB.Sunday)/NB.OneWeek)*NB.OneWeek
+  row["Value"] = row["download_mbps"]#
+  row["Value"] = row["avg_rtt"]
+  row[tb.bucket(row["Time"])] = row["Value"]
   return row
 
 def rank(nb):
-  """Provide a preliminary estimate of interest"""
+  """Provide a preliminary estimate of interest
+
+  Lowest value is most interesting.
+  """
   e = nb.energy
   if e['nrows'] < nb.TB.bucketcount:
     return 1000
-  if np.isnan(e['ratio']):
+  if np.isnan(e['nratio']):
     return 1000
-  return (-100 * math.log10(e['ratio']))
+  return (-100 * math.log10(e['nratio']))
 
-# TODO move this into the netblock class
-def firstpass(remain, width=8, verbose=None):
-  while len(remain.data) > 0:
-    sn = NB.SubNet(width, remain.first_row().clientIP)
-    rowmask = remain.data.clientIP.apply(sn.match)
-    blk = remain.fork_block(sn, rowmask=rowmask)
-    if verbose:
-      print "Found:", blk.subnet.str(), \
-             len(rowmask), len(blk.data), blk.energy['ratio'], blk.rank
-    NB.hpush(NB.NetBlock.todo, blk)
-    remain.data = remain.data[~(rowmask)]
-  print len(NB.NetBlock.todo)
-  return NB.NetBlock.todo
-
+defpath="../data/lga02_1Q2014.csv"
 def parse_args():
   import argparse
   parser = argparse.ArgumentParser(
       description="Analyze a bunch of data for diurnal signals")
   parser.add_argument("--input", metavar="FILE", type=str,
-                      default="../data.csv",
+                      default=defpath,
                       help="The file to process")
   parser.add_argument("--size", metavar="SIZE", type=int,
-                      default=12,
+                      default=24,
                       help="Buckets per day")
   parser.add_argument("--downsample", metavar="COUNT", type=int,
-                      default=1000,
+                      default=1,
                       help="Buckets per day")
   parser.add_argument("--width", metavar="SIZE", type=int,
                       default=8,
@@ -111,7 +103,7 @@ def main():
     remain.data = remain.data[~(rowmask)]
 
   summary = []
-  sumcols = ['subnet', 'nrows', 'nan', 'sum24', 'tsig', 'ratio', 'rank']
+  sumcols = ['subnet', 'nrows', 'nan', 'sum24', 'tsig', 'ratio', 'nratio', 'rank']
   while len(NB.NetBlock.todo):
     blk = NB.hpop(NB.NetBlock.todo)
     ofile = basename + blk.subnet.sstr() + '.csv'
@@ -121,7 +113,7 @@ def main():
     summary.append(e)
   ofile = basename + 'summary.csv'
   df = DataFrame(summary)
-  df = df.sort('nrows', ascending = False)
+  df = df.sort(['rank', 'nrows'], ascending = False)
   df.to_csv(ofile, cols=sumcols, index=False)
 
 if __name__ == "__main__":

@@ -25,45 +25,24 @@ import math
 import netblock as NB
 import energy
 import csv
+from time import gmtime, strftime
 
 ALLCOLS = ['server_ip_v4', 'client_ip_v4', 'start_time', 'Duration',
            'download_mbps', 'min_rtt', 'avg_rtt',
            'retran_per_DataSegsOut', 'retran_per_CongSignals']
+def sunday(t):
+  return int((t-NB.Sunday)/NB.OneWeek)*NB.OneWeek+NB.Sunday
+def showtime(t):
+  return strftime("%a, %d %b %Y %H:%M:%S GMT", gmtime(t))
 
 def parse_row(nb, row, tb):
   row["clientIP"] = NB.inet_addr(row["client_ip_v4"])
+  row["Time"] = int(row["start_time"]/1000000)
+  row["Week"] = sunday(row["Time"])
   row["Value"] = row["download_mbps"]
-  row[tb.bucket(row["start_time"])] = row["Value"]
-#  row[tb.bucket(row["start_time"])] = row["avg_rtt"]
+#  row["Value"] = row["avg_rtt"]
+  row[tb.bucket(row["Time"])] = row["Value"]
   return row
-
-def energy_mean_nan(nb, harmonics=2, method='ffill'):
-  """Compute the energy of this NetBlock.
-  OBSOLETE: use netblock.py::norm_spectra
-  Returns a dictionary:
-  e24 - energy at 1/(24hr) and selected harmonics
-  te - total energy
-  ra = e24/te
-  nrows - Number of datapoints in the sample
-  nan - Number of time bins for which values had to be interpolated
-  """
-
-  # Note that "mean" is not automatically correct.  Consider median, others
-  timeseries = Series([nb.data[tt].mean() for tt in  nb.TBall])
-  nan = nb.TB.bucketcount - timeseries.count()
-  if method:
-    timeseries = timeseries.fillna(method=method)
-    # TODO (mattmathis) exlore limit= options
-  else:
-    # zero fill is only correct for energy algebra
-    timeseries = [0.0 if np.isnan(tv) else tv for tv in timeseries]
-  e24, te = energy.power_ratio(timeseries, len(timeseries), harmonics)
-  try:
-    ra = e24/te
-  except:
-    # failed to fill all NaNs or other failure
-    ra = float('nan')
-  return { 'e24':e24, 'te':te, 'ra':ra, "nrows":len(nb.data), 'nan':nan }
 
 def rank(nb):
   """Provide a preliminary estimate of interest"""
@@ -107,7 +86,7 @@ def parse_args():
                       help="verbose flag")
   return parser.parse_args()
 
-
+FMT="{nrows} {mean} {sum24} {tsig} {ratio} {nratio}"
 def main():
   args = parse_args()
   verbose = args.verbose
@@ -118,12 +97,15 @@ def main():
   alldata.parse(pd.read_csv(open(args.input)),
                 downsample = args.downsample,
                 cols = ALLCOLS)
+  firsttest = alldata.data["Time"].min()
+  lasttest = alldata.data["Time"].max()
+  print "Test range:", showtime(firsttest), showtime(lasttest)
   todo = firstpass(alldata, width = args.width, verbose=verbose)
   print len(todo), "Total Blocks"
   while len(todo):
     blk = NB.hpop(todo)
-    del blk.energy["mag"]
-    print blk.subnet.str(), len(blk.data), blk.energy, blk.rank
+    print blk.subnet.str(), FMT.format(**blk.energy), blk.rank, \
+      showtime(blk.first_row().Time)
   exit(0)
 
 if __name__ == "__main__":
