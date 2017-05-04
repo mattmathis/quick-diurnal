@@ -455,7 +455,7 @@ class Test_Netblock(unittest.TestCase):
 
     fmt = "{mean} {rawpower} {bktpower} {spectrapower} {pratio} {sum24} {tsig} {ratio} {nratio}"
     print "    "+fmt
-    print "s=0 "+fmt.format(**testdata.norm_spectra(shuffle=1, power=True))
+    print "s=0 "+fmt.format(**testdata.norm_spectra(shuffle=0, power=True))
     print "s=1 "+fmt.format(**testdata.norm_spectra(shuffle=1, power=True))
     for i in range(10):
       s=testdata.norm_spectra(shuffle=2, power=True)
