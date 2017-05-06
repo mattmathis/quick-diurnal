@@ -28,7 +28,7 @@ import random
 ################ Time Buckets
 OneDay = 86400          # seconds per day
 OneWeek = 7*OneDay      # seconds per week
-Sunday = 3*OneDay       # Unix time 'Sun, 04 Jan 1970 00:00:00 +0000'
+FirstSunday = 3*OneDay  # Unix time 'Sun, 04 Jan 1970 00:00:00 +0000'
 
 class TimeBucket():
   """Tag tests by time, rounded into buckets.
@@ -159,7 +159,7 @@ class NetBlock():
     canon(row) should include:
       row["clientIP"] = inet_addr(row["client_ip_v4"])
       row["Time"] = int(row["start_time"]/1000000)
-      row["Week"] = int((row["Time"]-Sunday)/OneWeek)*OneWeek
+      row["Week"] = int((row["Time"]-FirstSunday)/OneWeek)*OneWeek+FirstSunday
       row["Value"] = some_value
       row[tb.bucket(row["Time"])] = row["Value"]
     NB: clientIP, Time, Week and Value, are accessed elsewhere
@@ -308,19 +308,19 @@ class NetBlock():
     assert magnitude[0] < 0.0001 # Confirm proper pre bias
     tsig = magnitude.sum()        # Total signal (excludes mean)
     sum24 = magnitude[1:harmonics+1].sum()
+    nratio = sum24/var
     try:
       ratio = sum24/tsig
-      nratio = ratio * size/harmonics
     except:
       # failed to fill all NaNs or other failures
       ratio = np.nan
-      nratio = np.nan
     ret = {'nrows':nrows, 'rawsum':rawsum, 'mean':mean, 'nan':nan, \
-            'mag':magnitude, 'sum24':sum24, 'tsig':tsig, 'ratio':ratio, 'nratio':nratio}
+            'mag':magnitude, 'sum24':sum24, 'tsig':tsig, 'var':var, 'ratio':ratio, 'nratio':nratio}
     if power:
       scale2 = size/2.0
       rawpower = sum([x*x for x in self.data["Value"]])
-      bktpower = sum([x*x for x in timebuckets]) + mean*mean*size
+      acpower = sum([x*x for x in timebuckets])
+      bktpower = acpower + mean*mean*size
       spectrapower = sum([x*x for x in magnitude])*scale2 + mean*mean*size
       pratio = spectrapower/bktpower
       ret.update({'rawpower':rawpower, 'bktpower':bktpower, 'spectrapower':spectrapower, 'pratio':pratio,})

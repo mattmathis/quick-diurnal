@@ -28,17 +28,23 @@ import math
 import netblock as NB
 import energy
 import csv
+from time import gmtime, strftime
 
 ALLCOLS = ['server_ip_v4', 'client_ip_v4', 'start_time', 'Duration',
            'download_mbps', 'min_rtt', 'avg_rtt',
            'retran_per_DataSegsOut', 'retran_per_CongSignals']
 
+def sunday(t):
+  return int((t-NB.FirstSunday)/NB.OneWeek)*NB.OneWeek+NB.FirstSunday
+def showtime(t):
+  return strftime("%a, %d %b %Y %H:%M:%S GMT", gmtime(t))
+
 def parse_row(nb, row, tb):
   row["clientIP"] = NB.inet_addr(row["client_ip_v4"])
   row["Time"] = int(row["start_time"]/1000000)
-  row["Week"] = int((row["Time"]-NB.Sunday)/NB.OneWeek)*NB.OneWeek
-  row["Value"] = row["download_mbps"]#
-  row["Value"] = row["avg_rtt"]
+  row["Week"] = int((row["Time"]-NB.FirstSunday)/NB.OneWeek)*NB.OneWeek
+  row["Value"] = row["download_mbps"]
+#  row["Value"] = row["avg_rtt"]
   row[tb.bucket(row["Time"])] = row["Value"]
   return row
 
@@ -91,6 +97,9 @@ def main():
   alldata.parse(pd.read_csv(open(args.input)),
                 downsample = args.downsample,
                 cols = ALLCOLS)
+  firsttest = alldata.data["Time"].min()
+  lasttest = alldata.data["Time"].max()
+  print "Test range: {0} through {1}".format(showtime(firsttest), showtime(lasttest))
   remain = alldata
   while len(remain.data) > 0:
     sn = NB.SubNet(args.width, remain.first_row().clientIP)
@@ -103,7 +112,7 @@ def main():
     remain.data = remain.data[~(rowmask)]
 
   summary = []
-  sumcols = ['subnet', 'nrows', 'nan', 'sum24', 'tsig', 'ratio', 'nratio', 'rank']
+  sumcols = ['subnet', 'nrows', 'nan', 'mean', 'sum24', 'tsig', 'ratio', 'nratio', 'rank']
   while len(NB.NetBlock.todo):
     blk = NB.hpop(NB.NetBlock.todo)
     ofile = basename + blk.subnet.sstr() + '.csv'

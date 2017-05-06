@@ -30,8 +30,9 @@ from time import gmtime, strftime
 ALLCOLS = ['server_ip_v4', 'client_ip_v4', 'start_time', 'Duration',
            'download_mbps', 'min_rtt', 'avg_rtt',
            'retran_per_DataSegsOut', 'retran_per_CongSignals']
+
 def sunday(t):
-  return int((t-NB.Sunday)/NB.OneWeek)*NB.OneWeek+NB.Sunday
+  return int((t-NB.FirstSunday)/NB.OneWeek)*NB.OneWeek+NB.FirstSunday
 def showtime(t):
   return strftime("%a, %d %b %Y %H:%M:%S GMT", gmtime(t))
 
@@ -86,7 +87,7 @@ def parse_args():
                       help="verbose flag")
   return parser.parse_args()
 
-FMT="{nrows} {mean} {sum24} {tsig} {ratio} {nratio}"
+FMT="{nrows} {mean} {sum24} {tsig} {var} {ratio} {nratio}"
 def main():
   args = parse_args()
   verbose = args.verbose
@@ -102,10 +103,10 @@ def main():
   print "Test range:", showtime(firsttest), showtime(lasttest)
   todo = firstpass(alldata, width = args.width, verbose=verbose)
   print len(todo), "Total Blocks"
+  print "Subnet", FMT, "rank"
   while len(todo):
     blk = NB.hpop(todo)
-    print blk.subnet.str(), FMT.format(**blk.energy), blk.rank, \
-      showtime(blk.first_row().Time)
+    print blk.subnet.str(), FMT.format(**blk.energy), blk.rank
   exit(0)
 
 if __name__ == "__main__":
