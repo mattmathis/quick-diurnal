@@ -211,14 +211,14 @@ class NetBlock():
     child = NetBlock()
     if sn == None:
       sn = self.subnet
-    child.subnet = sn
+    else:
+      child.subnet = sn
     if len(rowmask) == 0:
       rowmask = self.data.clientIP.apply(sn.match)
     child.data = DataFrame.reindex(self.data[rowmask])
-    if len(child.data) > 0:
-      child.energy = child.energyF()
-      if child.rankF:
-        child.rank = child.rankF()
+    child.energy = child.energyF()
+    if child.rankF:
+      child.rank = child.rankF()
     return child
 
   def process(self, go_deeper):
@@ -308,6 +308,7 @@ class NetBlock():
     assert magnitude[0] < 0.0001 # Confirm proper pre bias
     tsig = magnitude.sum()        # Total signal (excludes mean)
     sum24 = magnitude[1:harmonics+1].sum()
+    var = math.sqrt(sum([x*x for x in timebuckets]))/(size - 1)
     nratio = sum24/var
     try:
       ratio = sum24/tsig
@@ -467,7 +468,9 @@ class Test_Netblock(unittest.TestCase):
 ################
   def test_netblock_subnets(self):
     def test_rank(nb):
-      return nb.first_row().score
+      if len(nb.data)>0:
+        return nb.first_row().score
+      return (1000)
     def always_true(nb, *rest):
       return True
     def always_false(nb, *rest):

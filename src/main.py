@@ -26,6 +26,7 @@ import netblock as NB
 import energy
 import csv
 from time import gmtime, strftime
+import matplotlib.pyplot as plt
 
 ALLCOLS = ['server_ip_v4', 'client_ip_v4', 'start_time', 'Duration',
            'download_mbps', 'min_rtt', 'avg_rtt',
@@ -83,8 +84,12 @@ def parse_args():
   parser.add_argument("--width", metavar="SIZE", type=int,
                       default=8,
                       help="IP mask width")
+  parser.add_argument("--table", action='store_true',
+                      help="display tabular data")
+  parser.add_argument("--plot", action='store_true',
+                      help="display tabular data")
   parser.add_argument("--verbose", action='store_true',
-                      help="verbose flag")
+                      help="verbose pasing")
   return parser.parse_args()
 
 FMT="{nrows} {mean} {sum24} {tsig} {var} {ratio} {nratio}"
@@ -103,10 +108,23 @@ def main():
   print "Test range:", showtime(firsttest), showtime(lasttest)
   todo = firstpass(alldata, width = args.width, verbose=verbose)
   print len(todo), "Total Blocks"
-  print "Subnet", FMT, "rank"
-  while len(todo):
-    blk = NB.hpop(todo)
-    print blk.subnet.str(), FMT.format(**blk.energy), blk.rank
+  if args.table:
+    print "Subnet", FMT, "rank"
+    while len(todo):
+      blk = NB.hpop(todo)
+      print blk.subnet.str(), FMT.format(**blk.energy), blk.rank
+  if args.plot:
+    times = range(sunday(firsttest), sunday(lasttest)+NB.OneWeek, NB.OneWeek)
+    # summary = DataFrame(index=times)
+    while len(todo):
+      blk = NB.hpop(todo)
+      blk.stats = {}
+#      summary[blk.subnet.str()] = [blk.fork_block(rowmask=blk.data.Week == w).energy["ratio"] for w in times]
+      for week in times:
+        print blk.subnet.str(), showtime(week)
+        rmask = blk.data.Week == week
+        blk.stats[week] = blk.fork_block(rowmask=rmask).energy
+
   exit(0)
 
 if __name__ == "__main__":
