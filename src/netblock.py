@@ -253,8 +253,8 @@ class NetBlock():
 
     harmonics - How many harmonics of (1/24h) to include
     shuffle - shuffle the data to destroy all diurnal signals.
-       shuffle=0: Use fast algorithm
-       shuffle=1: Use isomorphic slow algorithm
+       shuffle=0: Use fast algorithm (no shuffle)
+       shuffle=1: Use isomorphic slower algorithm
        shuffle=2: Shuffle the raw data
             (For calibration experiments.)
     power - compute total signal power at multiple stages
@@ -281,7 +281,7 @@ class NetBlock():
     scale1 = 2.0/size # scale factor for normalizing signal
     nrows = self.data["Value"].count()
     if nrows < 1:
-      return {'nrows':nrows}
+      return {'nrows':nrows, 'ratio':np.nan, 'nratio':np.nan}
     rawsum = self.data["Value"].sum()
     mean = rawsum / nrows
     if shuffle:
@@ -305,26 +305,27 @@ class NetBlock():
     spectrum = np.fft.rfft(timebuckets)
     magnitude = Series([abs(x)*scale1 for x in spectrum])
     # phase = Series([phase(x) for x in spectrum]) - Not useful here
-    assert magnitude[0] < 0.0001 # Confirm proper pre bias
+    assert magnitude[0] < 0.0001 # Confirm timebuckets.mean() == 0
     tsig = magnitude.sum()        # Total signal (excludes mean)
     sum24 = magnitude[1:harmonics+1].sum()
-    var = math.sqrt(sum([x*x for x in timebuckets]))/(size - 1)
-    nratio = sum24/var
-    try:
-      ratio = sum24/tsig
-    except:
-      # failed to fill all NaNs or other failures
-      ratio = np.nan
+    sigma = math.sqrt(sum([x*x for x in timebuckets])/(size - 1))
+    nratio = sum24/sigma
+    ratio = sum24/tsig
     ret = {'nrows':nrows, 'rawsum':rawsum, 'mean':mean, 'nan':nan, \
-            'mag':magnitude, 'sum24':sum24, 'tsig':tsig, 'var':var, 'ratio':ratio, 'nratio':nratio}
+           'mag':magnitude, 'sum24':sum24, 'tsig':tsig, 'sigma':sigma, \
+           'ratio':ratio, 'nratio':nratio}
     if power:
+      # Compute extra things for calibration tests
       scale2 = size/2.0
       rawpower = sum([x*x for x in self.data["Value"]])
+      rawvar = self.data["Value"].var()
       acpower = sum([x*x for x in timebuckets])
       bktpower = acpower + mean*mean*size
-      spectrapower = sum([x*x for x in magnitude])*scale2 + mean*mean*size
+      spectrapower = sum([x*x for x in magnitude])*scale2 # + mean*mean*size
+      spectravar = magnitude.var()
       pratio = spectrapower/bktpower
-      ret.update({'rawpower':rawpower, 'bktpower':bktpower, 'spectrapower':spectrapower, 'pratio':pratio,})
+      ret.update({'rawpower':rawpower, 'rawvar':rawvar, 'acpower':acpower, \
+          'bktpower':bktpower, 'spectrapower':spectrapower, 'spectravar':spectravar, 'pratio':pratio,})
     return ret
 
 ################################################################
@@ -345,6 +346,7 @@ def test_subnet_canon(nb, row, tb):
 def test_parse_row(nb, row, tb):
   """Minimal parser for real data"""
   row["clientIP"] = inet_addr(row["client_ip_v4"])
+  row["Time"] = int(row["start_time"]/1000000)
   row["Value"] = row["download_mbps"]
   row[tb.bucket(row["Time"])] = row["Value"]
   return row
@@ -414,10 +416,12 @@ class Test_Netblock(unittest.TestCase):
     nb = NetBlock(OneDay/size, test_energy_canon, True, True)
     uniform = Series([1.0 for t in range(size)])
     self.AssertSectraVals(nb, uniform, 1, \
-                          nrows=size, rawsum=size, mean=1.0, nan=0, sum24=0.0, tsig=0.0)
+                          nrows=size, rawsum=size, mean=1.0, nan=0, sum24=0.0, tsig=0.0, sigma=0.0)
     sinewave1 = Series([math.sin((math.pi*2*t)/size) for t in range(size)])
+    SinSigma = math.sqrt(size/(size-1.0)/2.0)
     self.AssertSectraVals(nb, sinewave1, 1, \
                           rawpower=size/2.0, bktpower=size/2.0, spectrapower=size/2.0, \
+                          sigma=SinSigma, nratio=1.0/SinSigma, \
                           nrows=size, rawsum=0.0, mean=0.0, nan=0, sum24=1.0, tsig=1.0, ratio=1.0)
     sinewave2 = Series([math.sin((math.pi*4*t)/size) for t in range(size)])
     self.AssertSectraVals(nb, sinewave2, 1, sum24=0.0, tsig=1.0)
@@ -425,11 +429,11 @@ class Test_Netblock(unittest.TestCase):
     self.AssertSectraVals(nb, sinewave2, 3, sum24=1.0, tsig=1.0)
     impulse = Series([0.0 for t in range(size)])
     impulse[0] = 1.0
-    self.AssertSectraVals(nb, impulse, 1, rawpower=1.0, bktpower=1.0, spectrapower=1.0034722)
-    self.AssertSectraVals(nb, impulse, 1, sum24=2.0*1/size, tsig=1.0, ratio=2.0*1/size)
-    self.AssertSectraVals(nb, impulse, 2, sum24=2.0*2/size, tsig=1.0, ratio=2.0*2/size)
-    self.AssertSectraVals(nb, impulse, 3, sum24=2.0*3/size, tsig=1.0, ratio=2.0*3/size)
-    self.AssertSectraVals(nb, impulse, 4, sum24=2.0*4/size, tsig=1.0, ratio=2.0*4/size)
+    self.AssertSectraVals(nb, impulse, 1, sum24=2.0*1/size, ratio=2.0*1/size, \
+           rawpower=1.0, bktpower=1.0, spectrapower=1.0034722, sigma=0.05892556)
+    self.AssertSectraVals(nb, impulse, 2, sum24=2.0*2/size, ratio=2.0*2/size)
+    self.AssertSectraVals(nb, impulse, 3, sum24=2.0*3/size, ratio=2.0*3/size)
+    self.AssertSectraVals(nb, impulse, 4, sum24=2.0*4/size, ratio=2.0*4/size)
     inan =  Series([np.nan for t in range(size)])
     inan[0] = 1.0
     self.AssertSectraVals(nb, inan, 1, \
@@ -443,22 +447,23 @@ class Test_Netblock(unittest.TestCase):
     # TODO (Monte Carlo) Proof that for random data E(ratio) = num_harmonics/size
     # TODO model for Var(Ratio) as a function of Var(data)
 
-  def Xtest_netblock_specta_properties(self):
+  def test_netblock_specta_properties(self):
     """Confirm spectra properties on authentic data.
 
     This test does not work well enough to be useful.
 
     We need to understand how shuffling the data effects spectra variance.
     """
-    return # @@@@@@ FIXME
-
     buckets = 24*1
 
     testdata = NetBlock(OneDay/buckets, test_parse_row)
     testdata.parse(pd.read_csv(open("testdata.csv")), downsample=1)
 
-    fmt = "{mean} {rawpower} {bktpower} {spectrapower} {pratio} {sum24} {tsig} {ratio} {nratio}"
-    print "    "+fmt
+    fmt = "{nrows} {mean:8.7G} {sum24:8.7G} {tsig:8.7G} {sigma:8.7G} {ratio:8.7G} {nratio:8.7G}"
+    fmt += " {rawpower:8.7G} {rawvar:8.7G} {acpower:8.7G} {bktpower:8.7G} {spectrapower:8.7G} {spectravar:8.7G} {pratio:8.7G}"
+    fmth = "nrows  mean    sum24     tsig    sigma     ratio     nratio  "
+    fmth += "rawpower  rawvar  acpower  bktpower spectrapwrr spectvar pratio"
+    print "    "+fmth
     print "s=0 "+fmt.format(**testdata.norm_spectra(shuffle=0, power=True))
     print "s=1 "+fmt.format(**testdata.norm_spectra(shuffle=1, power=True))
     for i in range(10):

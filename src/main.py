@@ -25,7 +25,11 @@ import math
 import netblock as NB
 import energy
 import csv
-from time import gmtime, strftime
+from time import gmtime, strftime, sleep
+import datetime
+import matplotlib
+# matplotlib.use('AGG')
+# See https://matplotlib.org/faq/usage_faq.html for information on backends.
 import matplotlib.pyplot as plt
 
 ALLCOLS = ['server_ip_v4', 'client_ip_v4', 'start_time', 'Duration',
@@ -36,6 +40,8 @@ def sunday(t):
   return int((t-NB.FirstSunday)/NB.OneWeek)*NB.OneWeek+NB.FirstSunday
 def showtime(t):
   return strftime("%a, %d %b %Y %H:%M:%S GMT", gmtime(t))
+def showdate(t):
+  return strftime("%Y-%m-%d", gmtime(t))
 
 def parse_row(nb, row, tb):
   row["clientIP"] = NB.inet_addr(row["client_ip_v4"])
@@ -47,7 +53,10 @@ def parse_row(nb, row, tb):
   return row
 
 def rank(nb):
-  """Provide a preliminary estimate of interest"""
+  """Provide a preliminary estimate of interest
+
+  Small is most interesting.
+  """
   e = nb.energy
   if e['nrows'] < nb.TB.bucketcount:
     return 1000
@@ -86,8 +95,8 @@ def parse_args():
                       help="IP mask width")
   parser.add_argument("--table", action='store_true',
                       help="display tabular data")
-  parser.add_argument("--plot", action='store_true',
-                      help="display tabular data")
+  parser.add_argument("--plot", metavar='TYPE', type=str, default=None,
+                      help="display tabular data: ")
   parser.add_argument("--verbose", action='store_true',
                       help="verbose pasing")
   return parser.parse_args()
@@ -97,9 +106,9 @@ def main():
   args = parse_args()
   verbose = args.verbose
   alldata = NB.NetBlock(NB.OneDay/args.size,
-                   parse_row,
-                   NB.NetBlock.norm_spectra,
-                   rank)
+                        parse_row,
+                        lambda nb: nb.norm_spectra(shuffle=0),
+                        rank)
   alldata.parse(pd.read_csv(open(args.input)),
                 downsample = args.downsample,
                 cols = ALLCOLS)
@@ -115,17 +124,24 @@ def main():
       print blk.subnet.str(), FMT.format(**blk.energy), blk.rank
   if args.plot:
     times = range(sunday(firsttest), sunday(lasttest)+NB.OneWeek, NB.OneWeek)
-    # summary = DataFrame(index=times)
+    summary = DataFrame(index=times)
+    summary["Week"] = [t for t in times]
     while len(todo):
       blk = NB.hpop(todo)
-      blk.stats = {}
-#      summary[blk.subnet.str()] = [blk.fork_block(rowmask=blk.data.Week == w).energy["ratio"] for w in times]
-      for week in times:
-        print blk.subnet.str(), showtime(week)
-        rmask = blk.data.Week == week
-        blk.stats[week] = blk.fork_block(rowmask=rmask).energy
+      if blk.rank < 1000:
+        summary[blk.subnet.str()] = [blk.fork_block(rowmask=blk.data.Week == w).energy["nratio"] for w in times]
+    print summary
 
-  exit(0)
+    if args.plot == 'csv':
+      summary.to_csv("Output.csv", index=False, sep=' ', na_rep='0')
+    elif args.plot == 'mpl':
+      plt.ioff()
+      fig, ax = plt.subplots()
+      summary.plot(ax=ax)
+      fig.show()
+      while True:
+        print "Kill me"
+        sleep(10)
 
 if __name__ == "__main__":
   main()
