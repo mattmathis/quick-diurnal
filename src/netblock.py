@@ -171,8 +171,8 @@ class NetBlock():
       NetBlock.canonF = canon
       NetBlock.energyF = energy
       NetBlock.rankF = rank     # optional
-      if not (timebucket and canon and energy):
-        print "Warning: missing argument(s) on first NetBlock()"
+#      if not (timebucket and canon and energy):
+#        print "Warning: missing argument(s) on first NetBlock()"
 
   def parse(self, itr, cols=None, downsample=1):
     """Parse, canonicalize and score imported data into a NetBlock DataFrame
@@ -430,7 +430,7 @@ class Test_Netblock(unittest.TestCase):
     impulse = Series([0.0 for t in range(size)])
     impulse[0] = 1.0
     self.AssertSectraVals(nb, impulse, 1, sum24=2.0*1/size, ratio=2.0*1/size, \
-           rawpower=1.0, bktpower=1.0, spectrapower=1.0034722, sigma=0.05892556)
+           rawpower=1.0, bktpower=1.0, spectrapower=1.0, sigma=0.05892556)
     self.AssertSectraVals(nb, impulse, 2, sum24=2.0*2/size, ratio=2.0*2/size)
     self.AssertSectraVals(nb, impulse, 3, sum24=2.0*3/size, ratio=2.0*3/size)
     self.AssertSectraVals(nb, impulse, 4, sum24=2.0*4/size, ratio=2.0*4/size)
@@ -447,7 +447,7 @@ class Test_Netblock(unittest.TestCase):
     # TODO (Monte Carlo) Proof that for random data E(ratio) = num_harmonics/size
     # TODO model for Var(Ratio) as a function of Var(data)
 
-  def test_netblock_specta_properties(self):
+  def Xtest_netblock_specta_properties(self):
     """Confirm spectra properties on authentic data.
 
     This test does not work well enough to be useful.
@@ -459,16 +459,17 @@ class Test_Netblock(unittest.TestCase):
     testdata = NetBlock(OneDay/buckets, test_parse_row)
     testdata.parse(pd.read_csv(open("testdata.csv")), downsample=1)
 
-    fmt = "{nrows} {mean:8.7G} {sum24:8.7G} {tsig:8.7G} {sigma:8.7G} {ratio:8.7G} {nratio:8.7G}"
-    fmt += " {rawpower:8.7G} {rawvar:8.7G} {acpower:8.7G} {bktpower:8.7G} {spectrapower:8.7G} {spectravar:8.7G} {pratio:8.7G}"
-    fmth = "nrows  mean    sum24     tsig    sigma     ratio     nratio  "
-    fmth += "rawpower  rawvar  acpower  bktpower spectrapwrr spectvar pratio"
+    F = '10.4G'
+    fmt = "{nrows} {mean:{F}} {sum24:{F}} {tsig:{F}} {sigma:{F}} {ratio:{F}} {nratio:{F}}"
+    fmt += " {rawpower:{F}} {rawvar:{F}} {acpower:{F}} {bktpower:{F}} {spectrapower:{F}} {spectravar:{F}} {pratio:{F}}"
+    fmth = "nrows    mean      sum24       tsig      sigma      ratio     nratio   "
+    fmth += "rawpower   rawvar     acpower    bktpower spectrapwrr   spectvar   pratio"
     print "    "+fmth
-    print "s=0 "+fmt.format(**testdata.norm_spectra(shuffle=0, power=True))
-    print "s=1 "+fmt.format(**testdata.norm_spectra(shuffle=1, power=True))
+    print "s=0 "+fmt.format(F=F, **testdata.norm_spectra(shuffle=0, power=True))
+    print "s=1 "+fmt.format(F=F, **testdata.norm_spectra(shuffle=1, power=True))
     for i in range(10):
       s=testdata.norm_spectra(shuffle=2, power=True)
-      print "s=2 "+fmt.format(**s)
+      print "s=2 "+fmt.format(F=F, **s)
 
 ################
   def test_netblock_subnets(self):
